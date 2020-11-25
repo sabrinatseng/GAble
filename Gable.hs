@@ -1,6 +1,6 @@
-import Control.Parallel
-import Control.Monad.State
-import Monad
+--import Control.Parallel
+--import Control.Monad.State
+--import Monad
 import System.Random
 import Data.List  
 import Data.Map (Map, member, (!), size, elemAt, fromList)
@@ -12,13 +12,15 @@ import Debug.Trace
 defaultFitness = 100000
 popSize = 20
 generations = 10
-chromosomeSize = 200
+chromosomeSize = 2
 mutationRate = 0.01
 crossoverRate = 0.7
 tournamentSize = 3
 eliteSize = 2
 
-data GAIndividual = GAIndividual { genotype :: [Int], fitness :: Int } deriving (Show, Eq)
+type Genotype = [Int]
+type Fitness = Int
+data GAIndividual = GAIndividual { genotype :: Genotype, fitness :: Fitness } deriving (Show, Eq)
                                             
 {- Type for population-}
 type Population = [GAIndividual]
@@ -30,7 +32,7 @@ mutateOp [] _ _ = []
 mutateOp (ind:pop) rndDs rndIs = (createIndiv (mutate'' (genotype ind) (drop (length (genotype ind)) rndDs) (drop (length (genotype ind)) rndIs))) : mutateOp pop rndDs rndIs
 
 {- Mutate a genotype by uniformly changing the integer. -}
-mutate'' :: [Int] -> [Float] -> [Int] -> [Int]
+mutate'' :: Genotype -> [Float] -> [Int] -> [Int]
 mutate'' [] _ _ = []
 mutate'' _ [] _ = []
 mutate'' _ _ [] = []
@@ -45,8 +47,8 @@ xoverOp (ind1:ind2:pop) rndDs =
   in (createIndiv child1): (createIndiv child2) : xoverOp pop (drop 2 rndDs)
 xoverOp (ind1:[]) rndDs = [ind1]         
 
-{- Singlepoint crossover, crossover porbability is hardcoded-}
-xover :: ([Int], [Int]) -> [Float] -> ([Int], [Int])
+{- Singlepoint crossover, crossover probability is hardcoded-}
+xover :: (Genotype, Genotype) -> [Float] -> (Genotype, Genotype)
 xover ([],_) _ = ([],[])
 xover (_,[]) _ = ([],[])
 xover (_,_) [] = error "Empty rnd"
@@ -58,7 +60,7 @@ xover (p1,p2) (rndD:rndDs) =
      else (p1, p2)
           
 {- Utility function for getting crossover point TODO Make nicerway of returning 1 as a minimum value -}
-xopoint :: [Float] -> [Int] -> Int
+xopoint :: [Float] -> Genotype -> Int
 xopoint [] _ = error "Empty rnd"
 xopoint _ [] = error "Empty genotype" 
 xopoint (rnd:rndDs) codons = max 1 (round $ (rnd) * (fromIntegral $ length codons))
@@ -87,7 +89,7 @@ generationalReplacementOp orgPop newPop elites =
      pop
 
 showInd :: GAIndividual -> String
-showInd (GAIndividual genotype fitness) = "Fit:" ++ show fitness
+showInd (GAIndividual genotype fitness) = "Fit:" ++ show fitness ++ "\nGenotype: " ++ show genotype
 
 showPop :: Population -> String
 showPop [] = ""
@@ -98,10 +100,14 @@ oneMax :: [Int] -> Int
 oneMax [] = 0
 oneMax (value:values) = value + oneMax values
 
-{- oneMaxOp. OneMax on the population -}
-oneMaxOp :: Population -> Population
-oneMaxOp [] = []
-oneMaxOp (ind:pop) = (GAIndividual (genotype ind) (oneMax (genotype ind))) : oneMaxOp pop
+{- Calculate fitness for a genotype -}
+calculateFitness :: Genotype -> Fitness
+calculateFitness = oneMax
+
+{- Calculate fitness on a population -}
+calculateFitnessOp :: Population -> Population
+calculateFitnessOp [] = []
+calculateFitnessOp (ind:pop) = (GAIndividual (genotype ind) (calculateFitness (genotype ind))) : calculateFitnessOp pop
                                        
 {-Makes an individual with default values-}
 createIndiv :: [Int] -> GAIndividual
@@ -119,7 +125,7 @@ generation. Hard coding tournament size and elite size TODO drop a less arbitrar
 evolve :: Population -> [Int] -> Int -> [Float] -> Population
 evolve pop _ 0 _ = []
 evolve [] _ _ _ = error "Empty population"
-evolve pop rndIs gen rndDs = bestInd pop minInd : evolve ( generationalReplacementOp pop ( oneMaxOp ( mutateOp ( xoverOp ( tournamentSelectionOp (length pop) pop rndIs tournamentSize) rndDs) rndDs rndIs) ) eliteSize) (drop (popSize * 10) rndIs) (gen - 1) (drop (popSize * 10) rndDs)
+evolve pop rndIs gen rndDs = bestInd pop minInd : evolve ( generationalReplacementOp pop ( calculateFitnessOp ( mutateOp ( xoverOp ( tournamentSelectionOp (length pop) pop rndIs tournamentSize) rndDs) rndDs rndIs) ) eliteSize) (drop (popSize * 10) rndIs) (gen - 1) (drop (popSize * 10) rndDs)
 
 {- Utility for sorting GAIndividuals-}
 sortInd :: GAIndividual -> GAIndividual -> Ordering
@@ -154,4 +160,5 @@ main = do
   let pop = createPop popSize randNumber
   let newPop = [createIndiv [1..10], createIndiv [1..10]]
   let bestInds = (evolve pop randNumber generations randNumberD) 
-  print $ showInd $ bestInd bestInds minInd
+  putStrLn $ showInd $ bestInd bestInds minInd
+  --putStrLn $ showPop bestInds
