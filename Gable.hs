@@ -9,10 +9,10 @@ import Debug.Trace
 
 
 {-properties-}
-defaultFitness = 100000
+defaultFitness = 0
 popSize = 20
 generations = 10
-chromosomeSize = 2
+chromosomeSize = 5
 mutationRate = 0.01
 crossoverRate = 0.7
 tournamentSize = 3
@@ -71,7 +71,7 @@ tournamentSelectionOp 0 _ _ _ = []
 tournamentSelectionOp _ [] _ _ = error "Empty population"
 tournamentSelectionOp _ _ [] _ = error "Empty rnd"
 tournamentSelectionOp _ _ _ 0 = error "Zero tournament size" --What about minus?
-tournamentSelectionOp cnt pop rndIs tournamentSize = (bestInd (selectIndividuals rndIs pop tournamentSize) minInd) : tournamentSelectionOp (cnt - 1) pop (drop tournamentSize rndIs) tournamentSize 
+tournamentSelectionOp cnt pop rndIs tournamentSize = (bestInd (selectIndividuals rndIs pop tournamentSize) maxInd) : tournamentSelectionOp (cnt - 1) pop (drop tournamentSize rndIs) tournamentSize 
 
 {-Selection with replacement TODO (Use parital application for tournament
 selection and select individuals?-}
@@ -89,11 +89,11 @@ generationalReplacementOp orgPop newPop elites =
      pop
 
 showInd :: GAIndividual -> String
-showInd (GAIndividual genotype fitness) = "Fit:" ++ show fitness ++ "\nGenotype: " ++ show genotype
+showInd (GAIndividual genotype fitness) = "Fit:" ++ show fitness ++ ", Genotype: " ++ show genotype
 
 showPop :: Population -> String
 showPop [] = ""
-showPop (ind:pop) = showInd ind ++ ":" ++ showPop pop
+showPop (ind:pop) = showInd ind ++ "\n" ++ showPop pop
 
 {- oneMax. Counting ones-}
 oneMax :: [Int] -> Int
@@ -125,7 +125,7 @@ generation. Hard coding tournament size and elite size TODO drop a less arbitrar
 evolve :: Population -> [Int] -> Int -> [Float] -> Population
 evolve pop _ 0 _ = []
 evolve [] _ _ _ = error "Empty population"
-evolve pop rndIs gen rndDs = bestInd pop minInd : evolve ( generationalReplacementOp pop ( calculateFitnessOp ( mutateOp ( xoverOp ( tournamentSelectionOp (length pop) pop rndIs tournamentSize) rndDs) rndDs rndIs) ) eliteSize) (drop (popSize * 10) rndIs) (gen - 1) (drop (popSize * 10) rndDs)
+evolve pop rndIs gen rndDs = bestInd pop maxInd : evolve ( generationalReplacementOp pop ( calculateFitnessOp ( mutateOp ( xoverOp ( tournamentSelectionOp (length pop) pop rndIs tournamentSize) rndDs) rndDs rndIs) ) eliteSize) (drop (popSize * 10) rndIs) (gen - 1) (drop (popSize * 10) rndDs)
 
 {- Utility for sorting GAIndividuals-}
 sortInd :: GAIndividual -> GAIndividual -> Ordering
@@ -148,17 +148,22 @@ minInd ind1 ind2
                 
 bestInd :: Population -> (GAIndividual -> GAIndividual -> GAIndividual) -> GAIndividual
 bestInd (ind:pop) best = foldr best ind pop
-  
-randoms' :: (RandomGen g, Random a) => g -> [a]  
-randoms' gen = let (value, newGen) = random gen in value:randoms' newGen
+
+{- Generates random numbers in range (0, n). -}
+randoms' :: (RandomGen g, Random a, Num a) => a -> g -> [a]
+randoms' n gen = let (value, newGen) = randomR (0, n) gen in value:randoms' n newGen
+--randoms' :: (RandomGen g, Random a) => g -> [a]
+--randoms' gen = let (value, newGen) = random gen in value:randoms' newGen
 
 {- Run the GA-}
 main = do
   gen <- getStdGen
-  let randNumber = randoms' gen :: [Int]         
-  let randNumberD = randoms' gen :: [Float]
+  let randNumber = randoms' 3 gen :: [Int]
+  let randNumberD = randoms' 1.0 gen :: [Float]
+  --let randNumber = randoms' gen :: [Int]
+  --let randNumberD = randoms' gen :: [Float]
   let pop = createPop popSize randNumber
   let newPop = [createIndiv [1..10], createIndiv [1..10]]
   let bestInds = (evolve pop randNumber generations randNumberD) 
-  putStrLn $ showInd $ bestInd bestInds minInd
-  --putStrLn $ showPop bestInds
+  putStrLn $ showInd $ bestInd bestInds maxInd
+  putStrLn $ showPop bestInds
