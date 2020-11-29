@@ -1,3 +1,7 @@
+--use `ghc --make Gable.hs -package liquidhaskell`
+import Language.Haskell.Liquid.Liquid (runLiquid)
+import Language.Haskell.Liquid.UX.CmdLine (getOpts)
+import GHC.IO.Exception
 --import Control.Parallel
 --import Control.Monad.State
 --import Monad
@@ -10,13 +14,46 @@ import Debug.Trace
 
 {-properties-}
 defaultFitness = 0
-popSize = 20
+popSize = 10
 generations = 10
-chromosomeSize = 5
+chromosomeSize = 2
 mutationRate = 0.01
 crossoverRate = 0.7
 tournamentSize = 3
 eliteSize = 2
+
+{- "program pieces" -}
+data ProgramPiece = ProgramPiece { id :: Int, name :: String, impl :: String } deriving (Show, Eq)
+
+{- hardcoded pieces for filter evens -}
+isOddImpl = unlines [
+  "{-@ condition :: x:Int -> {v:Bool | (v <=> (x mod 2 /= 0))} @-}",
+  "condition   :: Int -> Bool",
+  "condition x = x `mod` 2 /= 0"
+  ]
+isOddPiece = ProgramPiece 0 "isOdd" isOddImpl
+
+isEvenImpl = unlines [
+  "{-@ condition :: x:Int -> {v:Bool | (v <=> (x mod 2 == 0))} @-}",
+  "condition   :: Int -> Bool",
+  "condition x = x `mod` 2 == 0"
+  ]
+isEvenPiece = ProgramPiece 1 "isEven" isEvenImpl
+filterImpl = unlines [
+  "{-@ type Even = {v:Int | v mod 2 = 0} @-}",
+  "{-@ filterEvens :: [Int] -> [Even] @-}",
+  "filterEvens :: [Int] -> [Int]",
+  "filterEvens xs = [a | a <- xs, condition a]"
+  ]
+filterPiece = ProgramPiece 2 "filter" filterImpl
+rootImpl = unlines [
+  "test = [1, 3, 4, 6, 7, 2]",
+  "main = do",
+  "         putStrLn $ \"original: \" ++ show test",
+  "         putStrLn $ \"evens: \" ++ show (filterEvens test)"
+  ]
+  
+pieces = [isOddPiece, isEvenPiece, filterPiece]
 
 type Genotype = [Int]
 type Fitness = Int
@@ -100,6 +137,14 @@ oneMax :: [Int] -> Int
 oneMax [] = 0
 oneMax (value:values) = value + oneMax values
 
+{- Use refinement type checking to calculate fitness. -}
+refinementTypeCheck :: Genotype -> IO Fitness
+refinementTypeCheck g = do
+  writeFile "synth.hs" $ unlines $ map impl $ map (pieces !!) g
+  cfg <- getOpts ["synth.hs"]
+  (ec, _) <- runLiquid Nothing cfg
+  if ec == ExitSuccess then return 1 else return 0
+
 {- Calculate fitness for a genotype -}
 calculateFitness :: Genotype -> Fitness
 calculateFitness = oneMax
@@ -119,7 +164,7 @@ createPop :: Int -> [Int] -> Population
 createPop 0 _ = []
 createPop popCnt rndInts = createIndiv (take chromosomeSize rndInts) : createPop (popCnt-1) (drop chromosomeSize rndInts)
                            
-{- Evolve the population recursively counting with genptype and
+{- Evolve the population recursively counting with genotype and
 returning a population of the best individuals of each
 generation. Hard coding tournament size and elite size TODO drop a less arbitrary value of random values than 10-}
 evolve :: Population -> [Int] -> Int -> [Float] -> Population
@@ -167,3 +212,7 @@ main = do
   let bestInds = (evolve pop randNumber generations randNumberD) 
   putStrLn $ showInd $ bestInd bestInds maxInd
   putStrLn $ showPop bestInds
+  --fitness1 <- calculateFitnessNew [isEvenPiece, filterPiece]
+  --fitness2 <- calculateFitnessNew [isOddPiece, filterPiece]
+  --putStrLn $ "fitness success = " ++ show (fitness1 :: Int)
+  --putStrLn $ "fitness fail = " ++ show (fitness2 :: Int)
