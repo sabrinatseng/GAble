@@ -6,6 +6,8 @@ import GHC.IO.Exception
 --import Control.Monad.State
 --import Monad
 import System.Random
+import System.Posix.IO
+import System.IO.Unsafe
 import Data.List  
 import Data.Map (Map, member, (!), size, elemAt, fromList)
 import Data.Set (Set, fromList)
@@ -54,6 +56,8 @@ rootImpl = unlines [
   ]
   
 pieces = [isOddPiece, isEvenPiece, filterPiece]
+
+openFileFlags = OpenFileFlags { append=False, exclusive=False, noctty=False, nonBlock=False, trunc=True }
 
 type Genotype = [Int]
 type Fitness = Int
@@ -140,14 +144,18 @@ oneMax (value:values) = value + oneMax values
 {- Use refinement type checking to calculate fitness. -}
 refinementTypeCheck :: Genotype -> IO Fitness
 refinementTypeCheck g = do
-  writeFile "synth.hs" $ unlines $ map impl $ map (pieces !!) g
+  synthFile <- openFd "synth.hs" WriteOnly Nothing openFileFlags
+  fdWrite synthFile $ unlines $ map impl $ map (pieces !!) g
+  closeFd synthFile
+  --writeFile "synth.hs" $ unlines $ map impl $ map (pieces !!) g
   cfg <- getOpts ["synth.hs"]
   (ec, _) <- runLiquid Nothing cfg
   if ec == ExitSuccess then return 1 else return 0
 
 {- Calculate fitness for a genotype -}
+{-# NOINLINE calculateFitness #-}
 calculateFitness :: Genotype -> Fitness
-calculateFitness = oneMax
+calculateFitness = unsafePerformIO . refinementTypeCheck
 
 {- Calculate fitness on a population -}
 calculateFitnessOp :: Population -> Population
@@ -203,7 +211,7 @@ randoms' n gen = let (value, newGen) = randomR (0, n) gen in value:randoms' n ne
 {- Run the GA-}
 main = do
   gen <- getStdGen
-  let randNumber = randoms' 3 gen :: [Int]
+  let randNumber = randoms' 2 gen :: [Int]
   let randNumberD = randoms' 1.0 gen :: [Float]
   --let randNumber = randoms' gen :: [Int]
   --let randNumberD = randoms' gen :: [Float]
