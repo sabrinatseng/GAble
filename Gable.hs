@@ -4,7 +4,7 @@ import Language.Haskell.Liquid.UX.CmdLine (getOpts)
 import GHC.IO.Exception
 --import Control.Parallel
 --import Control.Monad.State
---import Monad
+import Control.Monad
 import System.Random
 import System.Posix.IO
 import System.IO.Unsafe
@@ -58,6 +58,7 @@ rootImpl = unlines [
 pieces = [isOddPiece, isEvenPiece, filterPiece]
 
 openFileFlags = OpenFileFlags { append=False, exclusive=False, noctty=False, nonBlock=False, trunc=True }
+synthFileName = "synth.hs"
 
 type Genotype = [Int]
 type Fitness = Int
@@ -141,14 +142,23 @@ oneMax :: [Int] -> Int
 oneMax [] = 0
 oneMax (value:values) = value + oneMax values
 
+{- Combine program pieces into a string. -}
+combinePieces :: [ProgramPiece] -> String
+combinePieces = unlines . (map impl)
+
+{- Write string to synth file using posix file descriptors -}
+writeToSynthFilePosix :: String -> IO ()
+writeToSynthFilePosix s = do
+  synthFile <- openFd synthFileName WriteOnly Nothing openFileFlags
+  fdWrite synthFile s
+  closeFd synthFile
+
 {- Use refinement type checking to calculate fitness. -}
 refinementTypeCheck :: Genotype -> IO Fitness
 refinementTypeCheck g = do
-  synthFile <- openFd "synth.hs" WriteOnly Nothing openFileFlags
-  fdWrite synthFile $ unlines $ map impl $ map (pieces !!) g
-  closeFd synthFile
+  writeToSynthFilePosix $ combinePieces $ map (pieces !!) g
   --writeFile "synth.hs" $ unlines $ map impl $ map (pieces !!) g
-  cfg <- getOpts ["synth.hs"]
+  cfg <- getOpts [ synthFileName ]
   (ec, _) <- runLiquid Nothing cfg
   if ec == ExitSuccess then return 1 else return 0
 
@@ -218,9 +228,10 @@ main = do
   let pop = createPop popSize randNumber
   let newPop = [createIndiv [1..10], createIndiv [1..10]]
   let bestInds = (evolve pop randNumber generations randNumberD) 
-  putStrLn $ showInd $ bestInd bestInds maxInd
   putStrLn $ showPop bestInds
-  --fitness1 <- calculateFitnessNew [isEvenPiece, filterPiece]
-  --fitness2 <- calculateFitnessNew [isOddPiece, filterPiece]
-  --putStrLn $ "fitness success = " ++ show (fitness1 :: Int)
-  --putStrLn $ "fitness fail = " ++ show (fitness2 :: Int)
+  let best = bestInd bestInds maxInd
+  putStrLn $ "best: " ++ showInd best
+  when ((fitness best) == 1) $ do
+    let s = combinePieces $ map (pieces !!) (genotype best)
+    writeToSynthFilePosix s
+    putStrLn s
