@@ -19,7 +19,7 @@ defaultFitness = 0
 popSize = 10
 generations = 10
 chromosomeSize = 2
-mutationRate = 0.01
+mutationRate = 0.2
 crossoverRate = 0.7
 tournamentSize = 3
 eliteSize = 2
@@ -166,6 +166,7 @@ refinementTypeCheck g = do
 {-# NOINLINE calculateFitness #-}
 calculateFitness :: Genotype -> Fitness
 calculateFitness = unsafePerformIO . refinementTypeCheck
+--calculateFitness = oneMax
 
 {- Calculate fitness on a population -}
 calculateFitnessOp :: Population -> Population
