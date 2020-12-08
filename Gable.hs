@@ -1,6 +1,8 @@
+{-# LANGUAGE TypeApplications #-}
 --use `ghc --make Gable.hs -package liquidhaskell`
 import Language.Haskell.Liquid.Liquid (runLiquid)
 import Language.Haskell.Liquid.UX.CmdLine (getOpts)
+import Language.Haskell.Interpreter
 import GHC.IO.Exception
 --import Control.Parallel
 --import Control.Monad.State
@@ -10,6 +12,7 @@ import System.Posix.IO
 import System.IO.Unsafe
 import Data.List  
 import Data.Map (Map, member, (!), size, elemAt, fromList)
+import Data.Maybe
 import Data.Set (Set, fromList)
 import Debug.Trace
 
@@ -25,7 +28,8 @@ tournamentSize = 3
 eliteSize = 2
 
 {- "program pieces" -}
-data ProgramPiece = ProgramPiece { id :: Int, name :: String, impl :: String } deriving (Show, Eq)
+{- implEval is just a single statement that can be interpreted, TODO cleaner method? -}
+data ProgramPiece = ProgramPiece { name :: String, impl :: String, implEval :: String } deriving (Show, Eq)
 
 {- hardcoded pieces for filter evens -}
 isOddImpl = unlines [
@@ -33,30 +37,29 @@ isOddImpl = unlines [
   "condition   :: Int -> Bool",
   "condition x = x `mod` 2 /= 0"
   ]
-isOddPiece = ProgramPiece 0 "isOdd" isOddImpl
+isOddImplEval = "let condition x = x `mod` 2 /= 0"
+isOddPiece = ProgramPiece "isOdd" isOddImpl isOddImplEval
 
 isEvenImpl = unlines [
   "{-@ condition :: x:Int -> {v:Bool | (v <=> (x mod 2 == 0))} @-}",
   "condition   :: Int -> Bool",
   "condition x = x `mod` 2 == 0"
   ]
-isEvenPiece = ProgramPiece 1 "isEven" isEvenImpl
+isEvenImplEval = "let condition x = x `mod` 2 == 0"
+isEvenPiece = ProgramPiece "isEven" isEvenImpl isEvenImplEval
+
 filterImpl = unlines [
   "{-@ type Even = {v:Int | v mod 2 = 0} @-}",
   "{-@ filterEvens :: [Int] -> [Even] @-}",
   "filterEvens :: [Int] -> [Int]",
   "filterEvens xs = [a | a <- xs, condition a]"
   ]
-filterPiece = ProgramPiece 2 "filter" filterImpl
-rootImpl = unlines [
-  "test = [1, 3, 4, 6, 7, 2]",
-  "main = do",
-  "         putStrLn $ \"original: \" ++ show test",
-  "         putStrLn $ \"evens: \" ++ show (filterEvens test)"
-  ]
-  
+filterImplEval = "let filterEvens xs = [a | a <- xs, condition a]"
+filterPiece = ProgramPiece "filter" filterImpl filterImplEval
+
 pieces = [isOddPiece, isEvenPiece, filterPiece]
 
+{- options for writing to file -}
 openFileFlags = OpenFileFlags { append=False, exclusive=False, noctty=False, nonBlock=False, trunc=True }
 synthFileName = "synth.hs"
 
@@ -162,10 +165,25 @@ refinementTypeCheck g = do
   (ec, _) <- runLiquid Nothing cfg
   if ec == ExitSuccess then return 1 else return 0
 
+{- Check input/output pairs using eval -}
+evalIOPairs :: Genotype -> IO Fitness
+evalIOPairs g = do
+  r <- runInterpreter $ do
+          setImports ["Prelude"]
+          {- TODO this is hardcoded for chromosome size 2 for now -}
+          runStmt $ implEval $ pieces !! (g !! 0)
+          runStmt $ implEval $ pieces !! (g !! 1)
+          {- TODO maybe this lambda is not necessary -}
+          interpret "\\x -> filterEvens x" (as :: ([Int] -> [Int]))
+  case r of
+    Left err -> return 0
+    Right f -> return 1
+
 {- Calculate fitness for a genotype -}
 {-# NOINLINE calculateFitness #-}
 calculateFitness :: Genotype -> Fitness
-calculateFitness = unsafePerformIO . refinementTypeCheck
+calculateFitness = unsafePerformIO . evalIOPairs
+--calculateFitness = unsafePerformIO . refinementTypeCheck
 --calculateFitness = oneMax
 
 {- Calculate fitness on a population -}
