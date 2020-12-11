@@ -59,12 +59,24 @@ filterPiece = ProgramPiece "filter" filterImpl filterImplEval
 
 pieces = [isOddPiece, isEvenPiece, filterPiece]
 
+{- input/output examples for calculating fitness -}
+type Input = [Int]
+type Output = [Int]
+tests = [
+  ([0, 1, 2, 3, 4], [0, 2, 4]),
+  ([1, 3, 5, 7], []),
+  ([0, 2, 4, 6], [0, 2, 4, 6]),
+  ([], []),
+  ([3, 2, 4, 1, 5, 9], [2, 4])
+  ]
+(test_inputs, expected_outputs) = unzip tests
+
 {- options for writing to file -}
 openFileFlags = OpenFileFlags { append=False, exclusive=False, noctty=False, nonBlock=False, trunc=True }
 synthFileName = "synth.hs"
 
 type Genotype = [Int]
-type Fitness = Int
+type Fitness = Float
 data GAIndividual = GAIndividual { genotype :: Genotype, fitness :: Fitness } deriving (Show, Eq)
                                             
 {- Type for population-}
@@ -165,9 +177,9 @@ refinementTypeCheck g = do
   (ec, _) <- runLiquid Nothing cfg
   if ec == ExitSuccess then return 1 else return 0
 
-{- Check input/output pairs using eval -}
-evalIOPairs :: Genotype -> IO Fitness
-evalIOPairs g = do
+{- Check input/output examples using eval -}
+evalIOExamples :: Genotype -> IO Fitness
+evalIOExamples g = do
   r <- runInterpreter $ do
           setImports ["Prelude"]
           {- TODO this is hardcoded for chromosome size 2 for now -}
@@ -177,12 +189,20 @@ evalIOPairs g = do
           interpret "\\x -> filterEvens x" (as :: ([Int] -> [Int]))
   case r of
     Left err -> return 0
-    Right f -> return 1
+    Right f -> return $ (fromIntegral $ checkIOExamples (map f test_inputs) expected_outputs) / (fromIntegral $ length expected_outputs)
+
+{- Calculate the number of examples that were correct -}
+checkIOExamples :: [Output] -> [Output] -> Int
+checkIOExamples [] [] = 0
+checkIOExamples (x:xs) (y:ys)
+  -- first list is the actual output, second list is expected output
+  | x == y    = 1 + checkIOExamples xs ys
+  | otherwise = checkIOExamples xs ys
 
 {- Calculate fitness for a genotype -}
 {-# NOINLINE calculateFitness #-}
 calculateFitness :: Genotype -> Fitness
-calculateFitness = unsafePerformIO . evalIOPairs
+calculateFitness = unsafePerformIO . evalIOExamples
 --calculateFitness = unsafePerformIO . refinementTypeCheck
 --calculateFitness = oneMax
 
