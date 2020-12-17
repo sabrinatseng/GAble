@@ -21,7 +21,7 @@ import Debug.Trace
 defaultFitness = 0
 popSize = 10
 generations = 10
-chromosomeSize = 3
+chromosomeSize = 2
 mutationRate = 0.2
 --mutationRate = 1
 crossoverRate = 0.7
@@ -188,10 +188,9 @@ evalIOExamples :: Genotype -> IO Fitness
 evalIOExamples g = do
   r <- runInterpreter $ do
           setImports ["Prelude"]
-          {- TODO this is hardcoded for chromosome size 3 for now -}
+          {- TODO this is hardcoded for chromosome size 2 for now -}
           runStmt $ implEval $ pieces !! (g !! 0)
           runStmt $ implEval $ pieces !! (g !! 1)
-          runStmt $ implEval $ pieces !! (g !! 2)
           {- TODO maybe this lambda is not necessary -}
           interpret "\\x -> filterEvens x" (as :: ([Int] -> [Int]))
   case r of
@@ -236,11 +235,11 @@ evolve pop _ 0 _ = []
 evolve [] _ _ _ = error "Empty population"
 evolve pop rndIs gen rndDs = bestInd pop maxInd : evolve ( generationalReplacementOp pop ( calculateFitnessOp ( mutateOp ( xoverOp ( tournamentSelectionOp (length pop) pop rndIs tournamentSize) rndDs) rndDs rndIs) ) eliteSize) (drop (popSize * 10) rndIs) (gen - 1) (drop (popSize * 10) rndDs)
 
-{- Utility for sorting GAIndividuals-}
+{- Utility for sorting GAIndividuals in DESCENDING order-}
 sortInd :: GAIndividual -> GAIndividual -> Ordering
 sortInd ind1 ind2
-  | fitness ind1 > fitness ind2 = GT
-  | fitness ind1 < fitness ind2 = LT
+  | fitness ind1 > fitness ind2 = LT
+  | fitness ind1 < fitness ind2 = GT
   | fitness ind1 == fitness ind2 = EQ
                               
 {- Utility for finding the maximum fitness in a Population-}                           
@@ -267,7 +266,7 @@ randoms' n gen = let (value, newGen) = randomR (0, n) gen in value:randoms' n ne
 {- Run the GA-}
 main = do
   gen <- getStdGen
-  let randNumber = randoms' 3 gen :: [Int]
+  let randNumber = randoms' 2 gen :: [Int]
   let randNumberD = randoms' 1.0 gen :: [Float]
   --let randNumber = randoms' gen :: [Int]
   --let randNumberD = randoms' gen :: [Float]
