@@ -21,9 +21,11 @@ import Debug.Trace
 defaultFitness = 0
 popSize = 10
 generations = 10
-chromosomeSize = 2
+chromosomeSize = 3
 mutationRate = 0.2
+--mutationRate = 1
 crossoverRate = 0.7
+--crossoverRate = 1
 tournamentSize = 3
 eliteSize = 2
 
@@ -57,7 +59,9 @@ filterImpl = unlines [
 filterImplEval = "let filterEvens xs = [a | a <- xs, condition a]"
 filterPiece = ProgramPiece "filter" filterImpl filterImplEval
 
-pieces = [isOddPiece, isEvenPiece, filterPiece]
+-- empty piece
+nullPiece = ProgramPiece "null" "" ""
+pieces = [isOddPiece, isEvenPiece, filterPiece, nullPiece]
 
 {- input/output examples for calculating fitness -}
 type Input = [Int]
@@ -171,20 +175,23 @@ writeToSynthFilePosix s = do
 {- Use refinement type checking to calculate fitness. -}
 refinementTypeCheck :: Genotype -> IO Fitness
 refinementTypeCheck g = do
-  writeToSynthFilePosix $ combinePieces $ map (pieces !!) g
-  --writeFile "synth.hs" $ unlines $ map impl $ map (pieces !!) g
-  cfg <- getOpts [ synthFileName ]
-  (ec, _) <- runLiquid Nothing cfg
-  if ec == ExitSuccess then return 1 else return 0
+  let s = combinePieces $ map (pieces !!) g
+  if s == "" then return 0 else do
+    writeToSynthFilePosix s
+    --writeFile "synth.hs" $ unlines $ map impl $ map (pieces !!) g
+    cfg <- getOpts [ synthFileName ]
+    (ec, _) <- runLiquid Nothing cfg
+    if ec == ExitSuccess then return 1 else return 0
 
 {- Check input/output examples using eval -}
 evalIOExamples :: Genotype -> IO Fitness
 evalIOExamples g = do
   r <- runInterpreter $ do
           setImports ["Prelude"]
-          {- TODO this is hardcoded for chromosome size 2 for now -}
+          {- TODO this is hardcoded for chromosome size 3 for now -}
           runStmt $ implEval $ pieces !! (g !! 0)
           runStmt $ implEval $ pieces !! (g !! 1)
+          runStmt $ implEval $ pieces !! (g !! 2)
           {- TODO maybe this lambda is not necessary -}
           interpret "\\x -> filterEvens x" (as :: ([Int] -> [Int]))
   case r of
@@ -260,11 +267,12 @@ randoms' n gen = let (value, newGen) = randomR (0, n) gen in value:randoms' n ne
 {- Run the GA-}
 main = do
   gen <- getStdGen
-  let randNumber = randoms' 2 gen :: [Int]
+  let randNumber = randoms' 3 gen :: [Int]
   let randNumberD = randoms' 1.0 gen :: [Float]
   --let randNumber = randoms' gen :: [Int]
   --let randNumberD = randoms' gen :: [Float]
   let pop = createPop popSize randNumber
+  putStrLn $ showPop pop
   let newPop = [createIndiv [1..10], createIndiv [1..10]]
   let bestInds = (evolve pop randNumber generations randNumberD) 
   putStrLn $ showPop bestInds
