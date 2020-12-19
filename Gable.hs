@@ -1,5 +1,5 @@
 {-# LANGUAGE TypeApplications #-}
---use `ghc --make Gable.hs -package liquidhaskell`
+--use `ghc --make Gable.hs -package liquidhaskell -package statistics -package vector`
 import Language.Haskell.Liquid.Liquid (runLiquid)
 import Language.Haskell.Liquid.UX.CmdLine (getOpts)
 import Language.Haskell.Interpreter
@@ -12,19 +12,22 @@ import System.Posix.IO
 import System.IO.Unsafe
 import Data.List  
 import Data.Map (Map, member, (!), size, elemAt, fromList)
-import Data.Maybe
+import Data.Maybe (catMaybes)
 import Data.Set (Set, fromList)
+import Data.Vector (fromList, Vector)
 import Debug.Trace
+import Statistics.Sample (mean, stdDev)
+import Statistics.Quantile (def, median, midspread)
 
 
 {-properties-}
 defaultFitness = 0
-popSize = 10
-generations = 10
+popSize = 5
+generations = 15
 chromosomeSize = 2
-mutationRate = 0.2
+mutationRate = 0.3
 --mutationRate = 1
-crossoverRate = 0.7
+crossoverRate = 0.8
 --crossoverRate = 1
 tournamentSize = 3
 eliteSize = 2
@@ -146,7 +149,7 @@ selectIndividuals (rnd:rndIs) pop tournamentSize = (pop !! (rnd `mod` (length po
 generationalReplacementOp :: Population -> Population -> Int -> Population
 generationalReplacementOp orgPop newPop elites = 
   let pop = (take elites $ sortBy sortInd orgPop ) ++ (take (length newPop - elites) $ sortBy sortInd newPop )
-  in --trace (showPop orgPop ++ "\n" ++ showPop newPop ++ "\n" ++ showPop pop ++ "\n")
+  in --trace ("\n\n" ++ showPop orgPop ++ "\n" ++ showPop newPop ++ "\n" ++ showPop pop ++ "\n")
      pop
 
 showInd :: GAIndividual -> String
@@ -166,9 +169,9 @@ combinePieces :: [ProgramPiece] -> String
 combinePieces = unlines . (map impl)
 
 {- Write string to synth file using posix file descriptors -}
-writeToSynthFilePosix :: String -> IO ()
-writeToSynthFilePosix s = do
-  synthFile <- openFd synthFileName WriteOnly Nothing openFileFlags
+writeToFilePosix :: String -> String -> IO ()
+writeToFilePosix fname s = do
+  synthFile <- openFd fname WriteOnly Nothing openFileFlags
   fdWrite synthFile s
   closeFd synthFile
 
@@ -177,7 +180,7 @@ refinementTypeCheck :: Genotype -> IO Fitness
 refinementTypeCheck g = do
   let s = combinePieces $ map (pieces !!) g
   if s == "" then return 0 else do
-    writeToSynthFilePosix s
+    writeToFilePosix synthFileName s
     --writeFile "synth.hs" $ unlines $ map impl $ map (pieces !!) g
     cfg <- getOpts [ synthFileName ]
     (ec, _) <- runLiquid Nothing cfg
@@ -208,9 +211,9 @@ checkIOExamples (x:xs) (y:ys)
 {- Calculate fitness for a genotype -}
 {-# NOINLINE calculateFitness #-}
 calculateFitness :: Genotype -> Fitness
-calculateFitness = unsafePerformIO . evalIOExamples
---calculateFitness = unsafePerformIO . refinementTypeCheck
---calculateFitness = oneMax
+--calculateFitness = unsafePerformIO . evalIOExamples
+calculateFitness = unsafePerformIO . refinementTypeCheck
+--calculateFitness = fromIntegral . oneMax
 
 {- Calculate fitness on a population -}
 calculateFitnessOp :: Population -> Population
@@ -260,18 +263,42 @@ bestInd (ind:pop) best = foldr best ind pop
 {- Generates random numbers in range (0, n). -}
 randoms' :: (RandomGen g, Random a, Num a) => a -> g -> [a]
 randoms' n gen = let (value, newGen) = randomR (0, n) gen in value:randoms' n newGen
---randoms' :: (RandomGen g, Random a) => g -> [a]
---randoms' gen = let (value, newGen) = random gen in value:randoms' newGen
+
+{- Run n trials and return list of ints representing how many
+ - generations it took to find the optimal solution -}
+runTrials :: RandomGen g => Int -> g -> [Maybe Int]
+runTrials 0 _ = []
+runTrials n gen =
+  let (g1, g2) = split gen
+    in let randNumber = randoms' 2 g1 :: [Int]
+           randNumberD = randoms' 1.0 g1 :: [Float]
+       in let pop = createPop popSize randNumber
+          in let bestInds = (evolve pop randNumber generations randNumberD)
+             in (findIndex (\x -> fitness x == 1.0) bestInds) : (runTrials (n-1) g2)
+
+{- Print all the summary stats given result list -}
+printSummary :: [Maybe Int] -> IO ()
+printSummary vals = do
+  let reals = Data.Vector.fromList $ map fromIntegral (catMaybes vals)
+  putStrLn $ show reals
+  putStrLn $ "Count: " ++ (show $ length vals)
+  putStrLn $ "Failed: " ++ (show $ (length vals - length reals))
+  putStrLn $ "Mean: " ++ (show $ mean reals)
+  putStrLn $ "Median: " ++ (show $ median def reals)
+  putStrLn $ "Min: " ++ (show $ minimum reals)
+  putStrLn $ "Max: " ++ (show $ maximum reals)
+  putStrLn $ "StdDev: " ++ (show $ stdDev reals)
+  putStrLn $ "IQR: " ++ (show $ midspread def 4 reals)
+  return ()
 
 {- Run the GA-}
 main = do
   gen <- getStdGen
-  let randNumber = randoms' 2 gen :: [Int]
-  let randNumberD = randoms' 1.0 gen :: [Float]
-  --let randNumber = randoms' gen :: [Int]
-  --let randNumberD = randoms' gen :: [Float]
+  let vals = runTrials 30 gen
+  printSummary vals
+  {--
   let pop = createPop popSize randNumber
-  putStrLn $ showPop pop
+  --putStrLn $ showPop pop
   let newPop = [createIndiv [1..10], createIndiv [1..10]]
   let bestInds = (evolve pop randNumber generations randNumberD) 
   putStrLn $ showPop bestInds
@@ -281,3 +308,4 @@ main = do
     let s = combinePieces $ map (pieces !!) (genotype best)
     writeToSynthFilePosix s
     putStrLn s
+  --}
