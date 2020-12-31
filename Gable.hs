@@ -282,7 +282,9 @@ runTrials n gen =
            randNumberD = randoms' 1.0 g1 :: [Float]
        in let pop = createPop popSize randNumber
           in let bestInds = (evolve pop randNumber generations randNumberD)
-             in (findIndex (\x -> fitness x == 1.0) bestInds) : (runTrials (n-1) g2)
+             in let foundGen = findIndex (\x -> fitness x == 1.0) bestInds
+                in trace (showPop bestInds)
+                  foundGen : (runTrials (n-1) g2)
 
 {- Print all the summary stats given result list -}
 printSummary :: [Maybe Int] -> IO ()
