@@ -175,10 +175,18 @@ writeToFilePosix fname s = do
   fdWrite synthFile s
   closeFd synthFile
 
+{- Add a main function so refinement type check catches when something is not defined -}
+mainPiece = unlines [
+  "test = [1, 3, 4, 6, 7, 2]",
+  "main = do",
+  "        putStrLn $ \"original: \" ++ show test",
+  "        putStrLn $ \"evens: \" ++ show (filterEvens test)"
+  ]
+
 {- Use refinement type checking to calculate fitness. -}
 refinementTypeCheck :: Genotype -> IO Fitness
 refinementTypeCheck g = do
-  let s = combinePieces $ map (pieces !!) g
+  let s = (combinePieces $ map (pieces !!) g) ++ mainPiece
   if s == "" then return 0 else do
     writeToFilePosix synthFileName s
     --writeFile "synth.hs" $ unlines $ map impl $ map (pieces !!) g
