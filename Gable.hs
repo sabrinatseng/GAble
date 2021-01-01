@@ -33,8 +33,7 @@ tournamentSize = 3
 eliteSize = 2
 
 {- "program pieces" -}
-{- implEval is just a single statement that can be interpreted, TODO cleaner method? -}
-data ProgramPiece = ProgramPiece { name :: String, impl :: String, implEval :: String } deriving (Show, Eq)
+data ProgramPiece = ProgramPiece { name :: String, impl :: String } deriving (Show, Eq)
 
 {- hardcoded pieces for filter evens -}
 isOddImpl = unlines [
@@ -42,16 +41,14 @@ isOddImpl = unlines [
   "condition   :: Int -> Bool",
   "condition x = x `mod` 2 /= 0"
   ]
-isOddImplEval = "let condition x = x `mod` 2 /= 0"
-isOddPiece = ProgramPiece "isOdd" isOddImpl isOddImplEval
+isOddPiece = ProgramPiece "isOdd" isOddImpl
 
 isEvenImpl = unlines [
   "{-@ condition :: x:Int -> {v:Bool | (v <=> (x mod 2 == 0))} @-}",
   "condition   :: Int -> Bool",
   "condition x = x `mod` 2 == 0"
   ]
-isEvenImplEval = "let condition x = x `mod` 2 == 0"
-isEvenPiece = ProgramPiece "isEven" isEvenImpl isEvenImplEval
+isEvenPiece = ProgramPiece "isEven" isEvenImpl
 
 filterImpl = unlines [
   "{-@ type Even = {v:Int | v mod 2 = 0} @-}",
@@ -59,11 +56,10 @@ filterImpl = unlines [
   "filterEvens :: [Int] -> [Int]",
   "filterEvens xs = [a | a <- xs, condition a]"
   ]
-filterImplEval = "let filterEvens xs = [a | a <- xs, condition a]"
-filterPiece = ProgramPiece "filter" filterImpl filterImplEval
+filterPiece = ProgramPiece "filter" filterImpl
 
 -- empty piece
-nullPiece = ProgramPiece "null" "" ""
+nullPiece = ProgramPiece "null" ""
 pieces = [isOddPiece, isEvenPiece, filterPiece, nullPiece]
 
 {- input/output examples for calculating fitness -}
@@ -187,23 +183,23 @@ mainPiece = unlines [
 refinementTypeCheck :: Genotype -> IO Fitness
 refinementTypeCheck g = do
   let s = (combinePieces $ map (pieces !!) g) ++ mainPiece
-  if s == "" then return 0 else do
+  do
     writeToFilePosix synthFileName s
-    --writeFile "synth.hs" $ unlines $ map impl $ map (pieces !!) g
     cfg <- getOpts [ synthFileName ]
     (ec, _) <- runLiquid Nothing cfg
     if ec == ExitSuccess then return 1 else return 0
 
-{- Check input/output examples using eval -}
+{- Check input/output examples by writing to file then using eval -}
 evalIOExamples :: Genotype -> IO Fitness
 evalIOExamples g = do
+  let s = (combinePieces $ map (pieces !!) g)
+  writeToFilePosix synthFileName s
   r <- runInterpreter $ do
+          loadModules [synthFileName]
           setImports ["Prelude"]
-          {- TODO this is hardcoded for chromosome size 2 for now -}
-          runStmt $ implEval $ pieces !! (g !! 0)
-          runStmt $ implEval $ pieces !! (g !! 1)
-          {- TODO maybe this lambda is not necessary -}
-          interpret "\\x -> filterEvens x" (as :: ([Int] -> [Int]))
+          modules <- getLoadedModules
+          setTopLevelModules modules
+          interpret "filterEvens" (as :: ([Int] -> [Int]))
   case r of
     Left err -> return 0
     Right f -> return $ (fromIntegral $ checkIOExamples (map f test_inputs) expected_outputs) / (fromIntegral $ length expected_outputs)
@@ -220,7 +216,11 @@ checkIOExamples (x:xs) (y:ys)
 {-# NOINLINE calculateFitness #-}
 calculateFitness :: Genotype -> Fitness
 --calculateFitness = unsafePerformIO . evalIOExamples
-calculateFitness = unsafePerformIO . refinementTypeCheck
+--calculateFitness = unsafePerformIO . refinementTypeCheck
+calculateFitness g =
+  let fitness = unsafePerformIO $ refinementTypeCheck g
+    in trace (show g ++ " -> " ++ show fitness)
+       fitness
 --calculateFitness = fromIntegral . oneMax
 
 {- Calculate fitness on a population -}
