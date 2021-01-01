@@ -1,17 +1,17 @@
 {-# LANGUAGE TypeApplications #-}
---use `ghc --make Gable.hs -package liquidhaskell -package statistics -package vector`
+--use `ghc --make Gable.hs -package liquidhaskell -package statistics -package vector -package mtl`
 import Language.Haskell.Liquid.Liquid (runLiquid)
 import Language.Haskell.Liquid.UX.CmdLine (getOpts)
 import Language.Haskell.Interpreter
 import GHC.IO.Exception
 --import Control.Parallel
---import Control.Monad.State
+import Control.Monad.State
 import Control.Monad
 import System.Random
 import System.Posix.IO
 import System.IO.Unsafe
 import Data.List  
-import Data.Map (Map, member, (!), size, elemAt, fromList)
+import Data.Map (Map, empty, insert, lookup, member, (!), size, elemAt, fromList)
 import Data.Maybe (catMaybes)
 import Data.Set (Set, fromList)
 import Data.Vector (fromList, Vector)
@@ -84,6 +84,10 @@ data GAIndividual = GAIndividual { genotype :: Genotype, fitness :: Fitness } de
                                             
 {- Type for population-}
 type Population = [GAIndividual]
+
+{- Cache for fitness calculations -}
+fitnessMemo :: Map Genotype Fitness
+fitnessMemo = Data.Map.empty
 
 {- Calls mutate on the population. Resets the individual since a
  change should occur. TODO (Could be smarter an verify if a reset is needed)-}
@@ -214,20 +218,36 @@ checkIOExamples (x:xs) (y:ys)
 
 {- Calculate fitness for a genotype -}
 {-# NOINLINE calculateFitness #-}
-calculateFitness :: Genotype -> Fitness
+calculateFitness :: Genotype -> State (Map Genotype Fitness) Fitness
 --calculateFitness = unsafePerformIO . evalIOExamples
 --calculateFitness = unsafePerformIO . refinementTypeCheck
-calculateFitness g =
-  let fitness = unsafePerformIO $ refinementTypeCheck g
-    in trace (show g ++ " -> " ++ show fitness)
-       fitness
+calculateFitness g = do
+  memo <- Control.Monad.State.get
+  case Data.Map.lookup g memo of
+    Nothing -> do
+      -- calculate and store in cache, then return
+      let fitness = unsafePerformIO $ refinementTypeCheck g
+      let newState = Data.Map.insert g fitness memo
+      put newState
+      newMemo <- Control.Monad.State.get
+      return fitness
+    Just fitness -> return fitness
+  --let fitness = unsafePerformIO $ evalIOExamples g
+  --let fitness = unsafePerformIO $ refinementTypeCheck g
+    --in trace (show g ++ " -> " ++ show fitness)
+       --fitness
 --calculateFitness = fromIntegral . oneMax
 
 {- Calculate fitness on a population -}
-calculateFitnessOp :: Population -> Population
-calculateFitnessOp [] = []
-calculateFitnessOp (ind:pop) = (GAIndividual (genotype ind) (calculateFitness (genotype ind))) : calculateFitnessOp pop
-                                       
+calculateFitnessOp :: Population -> State (Map Genotype Fitness) Population
+calculateFitnessOp [] = return []
+calculateFitnessOp (ind:pop) = do
+  memo <- Control.Monad.State.get
+  let (fitness, memo2) = runState (calculateFitness (genotype ind)) memo
+  let (rest, memo3) = runState (calculateFitnessOp pop) memo2
+  put memo3
+  return ((GAIndividual (genotype ind) fitness) : rest)
+
 {-Makes an individual with default values-}
 createIndiv :: [Int] -> GAIndividual
 createIndiv [] = error "creating individual with an empty chromosome"
@@ -241,10 +261,15 @@ createPop popCnt rndInts = createIndiv (take chromosomeSize rndInts) : createPop
 {- Evolve the population recursively counting with genotype and
 returning a population of the best individuals of each
 generation. Hard coding tournament size and elite size TODO drop a less arbitrary value of random values than 10-}
-evolve :: Population -> [Int] -> Int -> [Float] -> Population
-evolve pop _ 0 _ = []
-evolve [] _ _ _ = error "Empty population"
-evolve pop rndIs gen rndDs = bestInd pop maxInd : evolve ( generationalReplacementOp pop ( calculateFitnessOp ( mutateOp ( xoverOp ( tournamentSelectionOp (length pop) pop rndIs tournamentSize) rndDs) rndDs rndIs) ) eliteSize) (drop (popSize * 10) rndIs) (gen - 1) (drop (popSize * 10) rndDs)
+evolve :: Population -> [Int] -> Int -> [Float] -> State (Map Genotype Fitness) Population
+evolve pop _ 0 _ = return []
+evolve [] _ _ _ = return (error "Empty population")
+evolve pop rndIs gen rndDs = do
+  memo <- Control.Monad.State.get
+  let (newPop, memo2) = runState ( calculateFitnessOp ( mutateOp ( xoverOp ( tournamentSelectionOp (length pop) pop rndIs tournamentSize) rndDs) rndDs rndIs) ) memo
+  let (rest, memo3) = runState (evolve ( generationalReplacementOp pop newPop eliteSize) (drop (popSize * 10) rndIs) (gen - 1) (drop (popSize * 10) rndDs) ) memo2
+  put memo3
+  return (bestInd pop maxInd : rest)
 
 {- Utility for sorting GAIndividuals in DESCENDING order-}
 sortInd :: GAIndividual -> GAIndividual -> Ordering
@@ -274,17 +299,19 @@ randoms' n gen = let (value, newGen) = randomR (0, n) gen in value:randoms' n ne
 
 {- Run n trials and return list of ints representing how many
  - generations it took to find the optimal solution -}
-runTrials :: RandomGen g => Int -> g -> [Maybe Int]
-runTrials 0 _ = []
-runTrials n gen =
+runTrials :: RandomGen g => Int -> g -> State (Map Genotype Fitness) [Maybe Int]
+runTrials 0 _ = return []
+runTrials n gen = do
+  memo <- Control.Monad.State.get
   let (g1, g2) = split gen
-    in let randNumber = randoms' 2 g1 :: [Int]
-           randNumberD = randoms' 1.0 g1 :: [Float]
-       in let pop = createPop popSize randNumber
-          in let bestInds = (evolve pop randNumber generations randNumberD)
-             in let foundGen = findIndex (\x -> fitness x == 1.0) bestInds
-                in trace (showPop bestInds)
-                  foundGen : (runTrials (n-1) g2)
+  let randNumber = randoms' 2 g1 :: [Int]
+  let randNumberD = randoms' 1.0 g1 :: [Float]
+  let pop = createPop popSize randNumber
+  let (bestInds, memo2) = runState (evolve pop randNumber generations randNumberD) memo
+  let foundGen = findIndex (\x -> fitness x == 1.0) bestInds
+  let (rest, memo3) = runState (runTrials (n-1) g2) memo2
+  put memo3
+  return (trace (showPop bestInds) (foundGen : rest))
 
 {- Print all the summary stats given result list -}
 printSummary :: [Maybe Int] -> IO ()
@@ -304,7 +331,7 @@ printSummary vals = do
 {- Run the GA-}
 main = do
   gen <- getStdGen
-  let vals = runTrials 30 gen
+  let vals = evalState (runTrials 30 gen) fitnessMemo
   printSummary vals
   {--
   let pop = createPop popSize randNumber
