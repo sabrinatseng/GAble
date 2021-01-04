@@ -10,6 +10,7 @@ import Control.Monad
 import System.Random
 import System.Posix.IO
 import System.IO.Unsafe
+import System.Environment
 import Data.List  
 import Data.Map (Map, member, (!), size, elemAt, fromList)
 import Data.Maybe (catMaybes)
@@ -24,7 +25,7 @@ import Statistics.Quantile (def, median, midspread)
 defaultFitness = 0
 popSize = 5
 generations = 15
-chromosomeSize = 2
+chromosomeSize = 4
 mutationRate = 0.3
 --mutationRate = 1
 crossoverRate = 0.8
@@ -180,8 +181,9 @@ mainPiece = unlines [
   ]
 
 {- Use refinement type checking to calculate fitness. -}
-refinementTypeCheck :: Genotype -> IO Fitness
-refinementTypeCheck g = do
+{-# NOINLINE refinementTypeCheck #-}
+refinementTypeCheck :: Genotype -> Fitness
+refinementTypeCheck g = unsafePerformIO $ do
   let s = (combinePieces $ map (pieces !!) g) ++ mainPiece
   do
     writeToFilePosix synthFileName s
@@ -190,8 +192,9 @@ refinementTypeCheck g = do
     if ec == ExitSuccess then return 1 else return 0
 
 {- Check input/output examples by writing to file then using eval -}
-evalIOExamples :: Genotype -> IO Fitness
-evalIOExamples g = do
+{-# NOINLINE evalIOExamples #-}
+evalIOExamples :: Genotype -> Fitness
+evalIOExamples g = unsafePerformIO $ do
   let s = (combinePieces $ map (pieces !!) g)
   writeToFilePosix synthFileName s
   r <- runInterpreter $ do
@@ -212,6 +215,7 @@ checkIOExamples (x:xs) (y:ys)
   | x == y    = 1 + checkIOExamples xs ys
   | otherwise = checkIOExamples xs ys
 
+{--
 {- Calculate fitness for a genotype -}
 {-# NOINLINE calculateFitness #-}
 calculateFitness :: Genotype -> Fitness
@@ -219,14 +223,15 @@ calculateFitness :: Genotype -> Fitness
 --calculateFitness = unsafePerformIO . refinementTypeCheck
 calculateFitness g =
   let fitness = unsafePerformIO $ refinementTypeCheck g
-    in trace (show g ++ " -> " ++ show fitness)
+    in --trace (show g ++ " -> " ++ show fitness)
        fitness
 --calculateFitness = fromIntegral . oneMax
+--}
 
 {- Calculate fitness on a population -}
-calculateFitnessOp :: Population -> Population
-calculateFitnessOp [] = []
-calculateFitnessOp (ind:pop) = (GAIndividual (genotype ind) (calculateFitness (genotype ind))) : calculateFitnessOp pop
+calculateFitnessOp :: Population -> (Genotype -> Fitness) -> Population
+calculateFitnessOp [] _ = []
+calculateFitnessOp (ind:pop) fitnessF = (GAIndividual (genotype ind) (fitnessF (genotype ind))) : calculateFitnessOp pop fitnessF
                                        
 {-Makes an individual with default values-}
 createIndiv :: [Int] -> GAIndividual
@@ -241,10 +246,10 @@ createPop popCnt rndInts = createIndiv (take chromosomeSize rndInts) : createPop
 {- Evolve the population recursively counting with genotype and
 returning a population of the best individuals of each
 generation. Hard coding tournament size and elite size TODO drop a less arbitrary value of random values than 10-}
-evolve :: Population -> [Int] -> Int -> [Float] -> Population
-evolve pop _ 0 _ = []
-evolve [] _ _ _ = error "Empty population"
-evolve pop rndIs gen rndDs = bestInd pop maxInd : evolve ( generationalReplacementOp pop ( calculateFitnessOp ( mutateOp ( xoverOp ( tournamentSelectionOp (length pop) pop rndIs tournamentSize) rndDs) rndDs rndIs) ) eliteSize) (drop (popSize * 10) rndIs) (gen - 1) (drop (popSize * 10) rndDs)
+evolve :: Population -> [Int] -> Int -> [Float] -> (Genotype -> Fitness) -> Population
+evolve pop _ 0 _ _ = []
+evolve [] _ _ _ _ = error "Empty population"
+evolve pop rndIs gen rndDs fitnessF = bestInd pop maxInd : evolve ( generationalReplacementOp pop ( calculateFitnessOp ( mutateOp ( xoverOp ( tournamentSelectionOp (length pop) pop rndIs tournamentSize) rndDs) rndDs rndIs) fitnessF ) eliteSize) (drop (popSize * 10) rndIs) (gen - 1) (drop (popSize * 10) rndDs) fitnessF
 
 {- Utility for sorting GAIndividuals in DESCENDING order-}
 sortInd :: GAIndividual -> GAIndividual -> Ordering
@@ -274,17 +279,17 @@ randoms' n gen = let (value, newGen) = randomR (0, n) gen in value:randoms' n ne
 
 {- Run n trials and return list of ints representing how many
  - generations it took to find the optimal solution -}
-runTrials :: RandomGen g => Int -> g -> [Maybe Int]
-runTrials 0 _ = []
-runTrials n gen =
+runTrials :: RandomGen g => Int -> g -> (Genotype -> Fitness) -> [Maybe Int]
+runTrials 0 _ _ = []
+runTrials n gen fitnessF =
   let (g1, g2) = split gen
-    in let randNumber = randoms' 2 g1 :: [Int]
+    in let randNumber = randoms' 3 g1 :: [Int]
            randNumberD = randoms' 1.0 g1 :: [Float]
        in let pop = createPop popSize randNumber
-          in let bestInds = (evolve pop randNumber generations randNumberD)
+          in let bestInds = (evolve pop randNumber generations randNumberD fitnessF)
              in let foundGen = findIndex (\x -> fitness x == 1.0) bestInds
                 in trace (showPop bestInds)
-                  foundGen : (runTrials (n-1) g2)
+                  foundGen : (runTrials (n-1) g2 fitnessF)
 
 {- Print all the summary stats given result list -}
 printSummary :: [Maybe Int] -> IO ()
@@ -304,7 +309,7 @@ printSummary vals = do
 {- Run the GA-}
 main = do
   gen <- getStdGen
-  let vals = runTrials 30 gen
+  let vals = runTrials 30 gen evalIOExamples
   printSummary vals
   {--
   let pop = createPop popSize randNumber
