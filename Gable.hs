@@ -306,10 +306,21 @@ printSummary vals = do
   putStrLn $ "IQR: " ++ (show $ midspread def 4 reals)
   return ()
 
+printHelp = error "Usage: ./Gable fitness_function num_trials"
+
 {- Run the GA-}
 main = do
   gen <- getStdGen
-  let vals = runTrials 30 gen evalIOExamples
+  args <- getArgs   -- [name of fitness function, num trials]
+  let (fitnessF', numTrials') = case args of
+                                  [fitnessF'', numTrials''] -> (fitnessF'', numTrials'')
+                                  _ -> printHelp
+  let fitnessF = case fitnessF' of
+                  "refinement-types" -> refinementTypeCheck
+                  "io-examples" -> evalIOExamples
+                  _ -> error "Unknown fitness function (use \"refinement-types\" or \"io-examples\")"
+  let numTrials = read numTrials' :: Int
+  let vals = runTrials numTrials gen fitnessF
   printSummary vals
   {--
   let pop = createPop popSize randNumber
