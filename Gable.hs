@@ -1,4 +1,5 @@
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TemplateHaskell #-}
 --use `ghc --make Gable.hs -package liquidhaskell -package statistics -package vector -package mtl`
 import Language.Haskell.Liquid.Liquid (runLiquid)
 import Language.Haskell.Liquid.UX.CmdLine (getOpts)
@@ -10,22 +11,29 @@ import Control.Monad
 import System.Random
 import System.Posix.IO
 import System.IO.Unsafe
-import System.Environment
 import Data.List  
 import Data.Map (Map, empty, insert, lookup, member, (!), size, elemAt, fromList)
-import Data.Maybe (catMaybes)
+import Data.Maybe (fromMaybe)
 import Data.Set (Set, fromList)
 import Data.Vector (fromList, Vector)
 import Debug.Trace
 import Statistics.Sample (mean, stdDev)
 import Statistics.Quantile (def, median, midspread)
+import HFlags
 
+{- Properties defined using command line flags -}
+defineFlag "chromosome_size" (5 :: Int) "Number of values in the chromosome"
+defineFlag "chromosome_range" (3 :: Int) "Range of values that the chromosome can have, 0..x"
+defineFlag "num_trials" (30 :: Int) "Number of trials of GE to run"
+data FitnessFunction = RefinementTypes | IOExamples deriving (Show, Read)
+defineEQFlag "fitness_function" [| RefinementTypes :: FitnessFunction |] "FITNESS_FUNCTION" "Fitness function for the GE"
+$(return []) -- hack to fix known issue with last flag not being recognized
 
 {-properties-}
 defaultFitness = 0
-popSize = 5
-generations = 15
-chromosomeSize = 4
+popSize = 10
+generations = 10
+--chromosomeSize = 5
 mutationRate = 0.3
 --mutationRate = 1
 crossoverRate = 0.8
@@ -221,13 +229,15 @@ checkIOExamples (x:xs) (y:ys)
 
 {- Calculate fitness for a genotype -}
 {-# NOINLINE calculateFitness #-}
-calculateFitness :: Genotype -> (Genotype -> Fitness) -> State (Map Genotype Fitness) Fitness
-calculateFitness g fitnessF = do
+calculateFitness :: Genotype -> State (Map Genotype Fitness) Fitness
+calculateFitness g = do
   memo <- Control.Monad.State.get
   case Data.Map.lookup g memo of
     Nothing -> do
       -- calculate and store in cache, then return
-      let fitness = fitnessF g
+      let fitness = case flags_fitness_function of 
+                      RefinementTypes -> refinementTypeCheck g
+                      IOExamples -> evalIOExamples g
       let newState = Data.Map.insert g fitness memo
       put newState
       newMemo <- Control.Monad.State.get
@@ -235,15 +245,15 @@ calculateFitness g fitnessF = do
     Just fitness -> return fitness
 
 {- Calculate fitness on a population -}
-calculateFitnessOp :: Population -> (Genotype -> Fitness) -> State (Map Genotype Fitness) Population
-calculateFitnessOp [] _ = return []
-calculateFitnessOp (ind:pop) fitnessF = do
+calculateFitnessOp :: Population -> State (Map Genotype Fitness) Population
+calculateFitnessOp [] = return []
+calculateFitnessOp (ind:pop) = do
   memo <- Control.Monad.State.get
-  let (fitness, memo2) = runState (calculateFitness (genotype ind) fitnessF) memo
-  let (rest, memo3) = runState (calculateFitnessOp pop fitnessF) memo2
+  let (fitness, memo2) = runState (calculateFitness (genotype ind) ) memo
+  let (rest, memo3) = runState (calculateFitnessOp pop) memo2
   put memo3
   return ((GAIndividual (genotype ind) fitness) : rest)
-
+                                       
 {-Makes an individual with default values-}
 createIndiv :: [Int] -> GAIndividual
 createIndiv [] = error "creating individual with an empty chromosome"
@@ -252,18 +262,18 @@ createIndiv xs = GAIndividual xs defaultFitness
 {-creates an array of individuals with random genotypes-}
 createPop :: Int -> [Int] -> Population
 createPop 0 _ = []
-createPop popCnt rndInts = createIndiv (take chromosomeSize rndInts) : createPop (popCnt-1) (drop chromosomeSize rndInts)
+createPop popCnt rndInts = createIndiv (take flags_chromosome_size rndInts) : createPop (popCnt-1) (drop flags_chromosome_size rndInts)
                            
 {- Evolve the population recursively counting with genotype and
 returning a population of the best individuals of each
 generation. Hard coding tournament size and elite size TODO drop a less arbitrary value of random values than 10-}
-evolve :: Population -> [Int] -> Int -> [Float] -> (Genotype -> Fitness) -> State (Map Genotype Fitness) Population
-evolve pop _ 0 _ _ = return []
-evolve [] _ _ _ _ = return (error "Empty population")
-evolve pop rndIs gen rndDs fitnessF = do
+evolve :: Population -> [Int] -> Int -> [Float] -> State (Map Genotype Fitness) Population
+evolve pop _ 0 _ = return []
+evolve [] _ _ _ = return (error "Empty population")
+evolve pop rndIs gen rndDs = do
   memo <- Control.Monad.State.get
-  let (newPop, memo2) = runState ( calculateFitnessOp ( mutateOp ( xoverOp ( tournamentSelectionOp (length pop) pop rndIs tournamentSize) rndDs) rndDs rndIs) fitnessF ) memo
-  let (rest, memo3) = runState ( evolve ( generationalReplacementOp pop newPop eliteSize) (drop (popSize * 10) rndIs) (gen - 1) (drop (popSize * 10) rndDs) fitnessF) memo2
+  let (newPop, memo2) = runState ( calculateFitnessOp ( mutateOp ( xoverOp ( tournamentSelectionOp (length pop) pop rndIs tournamentSize) rndDs) rndDs rndIs) ) memo
+  let (rest, memo3) = runState ( evolve ( generationalReplacementOp pop newPop eliteSize) (drop (popSize * 10) rndIs) (gen - 1) (drop (popSize * 10) rndDs) ) memo2
   put memo3
   return (bestInd pop maxInd : rest)
 
@@ -295,27 +305,26 @@ randoms' n gen = let (value, newGen) = randomR (0, n) gen in value:randoms' n ne
 
 {- Run n trials and return list of ints representing how many
  - generations it took to find the optimal solution -}
-runTrials :: RandomGen g => Int -> g -> (Genotype -> Fitness) -> State (Map Genotype Fitness) [Maybe Int]
-runTrials 0 _ _ = return []
-runTrials n gen fitnessF = do
+runTrials :: RandomGen g => Int -> g -> State (Map Genotype Fitness) [Maybe Int]
+runTrials 0 _ = return []
+runTrials n gen = do
   memo <- Control.Monad.State.get
   let (g1, g2) = split gen
   let randNumber = randoms' 3 g1 :: [Int]
   let randNumberD = randoms' 1.0 g1 :: [Float]
   let pop = createPop popSize randNumber
-  let (bestInds, memo2) = runState (evolve pop randNumber generations randNumberD fitnessF) memo
+  let (bestInds, memo2) = runState (evolve pop randNumber generations randNumberD) memo
   let foundGen = findIndex (\x -> fitness x == 1.0) bestInds
-  let (rest, memo3) = runState (runTrials (n-1) g2 fitnessF) memo2
+  let (rest, memo3) = runState (runTrials (n-1) g2 ) memo2
   put memo3
   return (trace (showPop bestInds) (foundGen : rest))
 
 {- Print all the summary stats given result list -}
 printSummary :: [Maybe Int] -> IO ()
 printSummary vals = do
-  let reals = Data.Vector.fromList $ map fromIntegral (catMaybes vals)
+  let reals = Data.Vector.fromList $ map fromIntegral (map (fromMaybe generations) vals)
   putStrLn $ show reals
   putStrLn $ "Count: " ++ (show $ length vals)
-  putStrLn $ "Failed: " ++ (show $ (length vals - length reals))
   putStrLn $ "Mean: " ++ (show $ mean reals)
   putStrLn $ "Median: " ++ (show $ median def reals)
   putStrLn $ "Min: " ++ (show $ minimum reals)
@@ -324,21 +333,11 @@ printSummary vals = do
   putStrLn $ "IQR: " ++ (show $ midspread def 4 reals)
   return ()
 
-printHelp = error "Usage: ./Gable fitness_function num_trials"
-
-{- Run the GA-}
+{- Run the GA -}
 main = do
+  _ <- $initHFlags ""
   gen <- getStdGen
-  args <- getArgs   -- [name of fitness function, num trials]
-  let (fitnessF', numTrials') = case args of
-                                  [fitnessF'', numTrials''] -> (fitnessF'', numTrials'')
-                                  _ -> printHelp
-  let fitnessF = case fitnessF' of
-                  "refinement-types" -> refinementTypeCheck
-                  "io-examples" -> evalIOExamples
-                  _ -> error "Unknown fitness function (use \"refinement-types\" or \"io-examples\")"
-  let numTrials = read numTrials' :: Int
-  let vals = evalState (runTrials numTrials gen fitnessF) fitnessMemo
+  let vals = evalState (runTrials flags_num_trials gen) fitnessMemo
   printSummary vals
   {--
   let pop = createPop popSize randNumber
