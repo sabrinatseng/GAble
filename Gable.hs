@@ -13,7 +13,7 @@ import System.IO.Unsafe
 import System.Environment
 import Data.List  
 import Data.Map (Map, member, (!), size, elemAt, fromList)
-import Data.Maybe (catMaybes)
+import Data.Maybe (fromMaybe)
 import Data.Set (Set, fromList)
 import Data.Vector (fromList, Vector)
 import Debug.Trace
@@ -25,7 +25,7 @@ import Statistics.Quantile (def, median, midspread)
 defaultFitness = 0
 popSize = 5
 generations = 15
-chromosomeSize = 4
+chromosomeSize = 5
 mutationRate = 0.3
 --mutationRate = 1
 crossoverRate = 0.8
@@ -294,10 +294,9 @@ runTrials n gen fitnessF =
 {- Print all the summary stats given result list -}
 printSummary :: [Maybe Int] -> IO ()
 printSummary vals = do
-  let reals = Data.Vector.fromList $ map fromIntegral (catMaybes vals)
+  let reals = Data.Vector.fromList $ map fromIntegral (map (fromMaybe generations) vals)
   putStrLn $ show reals
   putStrLn $ "Count: " ++ (show $ length vals)
-  putStrLn $ "Failed: " ++ (show $ (length vals - length reals))
   putStrLn $ "Mean: " ++ (show $ mean reals)
   putStrLn $ "Median: " ++ (show $ median def reals)
   putStrLn $ "Min: " ++ (show $ minimum reals)
