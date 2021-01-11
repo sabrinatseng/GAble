@@ -1,4 +1,5 @@
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TemplateHaskell #-}
 --use `ghc --make Gable.hs -package liquidhaskell -package statistics -package vector`
 import Language.Haskell.Liquid.Liquid (runLiquid)
 import Language.Haskell.Liquid.UX.CmdLine (getOpts)
@@ -10,7 +11,6 @@ import Control.Monad
 import System.Random
 import System.Posix.IO
 import System.IO.Unsafe
-import System.Environment
 import Data.List  
 import Data.Map (Map, member, (!), size, elemAt, fromList)
 import Data.Maybe (fromMaybe)
@@ -19,13 +19,21 @@ import Data.Vector (fromList, Vector)
 import Debug.Trace
 import Statistics.Sample (mean, stdDev)
 import Statistics.Quantile (def, median, midspread)
+import HFlags
 
+{- Properties defined using command line flags -}
+defineFlag "chromosome_size" (5 :: Int) "Number of values in the chromosome"
+defineFlag "chromosome_range" (3 :: Int) "Range of values that the chromosome can have, 0..x"
+defineFlag "num_trials" (30 :: Int) "Number of trials of GE to run"
+data FitnessFunction = RefinementTypes | IOExamples deriving (Show, Read)
+defineEQFlag "fitness_function" [| RefinementTypes :: FitnessFunction |] "FITNESS_FUNCTION" "Fitness function for the GE"
+$(return []) -- hack to fix known issue with last flag not being recognized
 
 {-properties-}
 defaultFitness = 0
-popSize = 5
-generations = 15
-chromosomeSize = 5
+popSize = 10
+generations = 10
+--chromosomeSize = 5
 mutationRate = 0.3
 --mutationRate = 1
 crossoverRate = 0.8
@@ -215,19 +223,6 @@ checkIOExamples (x:xs) (y:ys)
   | x == y    = 1 + checkIOExamples xs ys
   | otherwise = checkIOExamples xs ys
 
-{--
-{- Calculate fitness for a genotype -}
-{-# NOINLINE calculateFitness #-}
-calculateFitness :: Genotype -> Fitness
---calculateFitness = unsafePerformIO . evalIOExamples
---calculateFitness = unsafePerformIO . refinementTypeCheck
-calculateFitness g =
-  let fitness = unsafePerformIO $ refinementTypeCheck g
-    in --trace (show g ++ " -> " ++ show fitness)
-       fitness
---calculateFitness = fromIntegral . oneMax
---}
-
 {- Calculate fitness on a population -}
 calculateFitnessOp :: Population -> (Genotype -> Fitness) -> Population
 calculateFitnessOp [] _ = []
@@ -241,7 +236,7 @@ createIndiv xs = GAIndividual xs defaultFitness
 {-creates an array of individuals with random genotypes-}
 createPop :: Int -> [Int] -> Population
 createPop 0 _ = []
-createPop popCnt rndInts = createIndiv (take chromosomeSize rndInts) : createPop (popCnt-1) (drop chromosomeSize rndInts)
+createPop popCnt rndInts = createIndiv (take flags_chromosome_size rndInts) : createPop (popCnt-1) (drop flags_chromosome_size rndInts)
                            
 {- Evolve the population recursively counting with genotype and
 returning a population of the best individuals of each
@@ -283,7 +278,7 @@ runTrials :: RandomGen g => Int -> g -> (Genotype -> Fitness) -> [Maybe Int]
 runTrials 0 _ _ = []
 runTrials n gen fitnessF =
   let (g1, g2) = split gen
-    in let randNumber = randoms' 3 g1 :: [Int]
+    in let randNumber = randoms' flags_chromosome_range g1 :: [Int]
            randNumberD = randoms' 1.0 g1 :: [Float]
        in let pop = createPop popSize randNumber
           in let bestInds = (evolve pop randNumber generations randNumberD fitnessF)
@@ -305,21 +300,14 @@ printSummary vals = do
   putStrLn $ "IQR: " ++ (show $ midspread def 4 reals)
   return ()
 
-printHelp = error "Usage: ./Gable fitness_function num_trials"
-
-{- Run the GA-}
+{- Run the GA -}
 main = do
+  _ <- $initHFlags ""
   gen <- getStdGen
-  args <- getArgs   -- [name of fitness function, num trials]
-  let (fitnessF', numTrials') = case args of
-                                  [fitnessF'', numTrials''] -> (fitnessF'', numTrials'')
-                                  _ -> printHelp
-  let fitnessF = case fitnessF' of
-                  "refinement-types" -> refinementTypeCheck
-                  "io-examples" -> evalIOExamples
-                  _ -> error "Unknown fitness function (use \"refinement-types\" or \"io-examples\")"
-  let numTrials = read numTrials' :: Int
-  let vals = runTrials numTrials gen fitnessF
+  let fitnessF = case flags_fitness_function of
+                  RefinementTypes -> refinementTypeCheck
+                  IOExamples -> evalIOExamples
+  let vals = runTrials flags_num_trials gen fitnessF
   printSummary vals
   {--
   let pop = createPop popSize randNumber
