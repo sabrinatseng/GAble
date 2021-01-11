@@ -215,6 +215,12 @@ evalIOExamples g = unsafePerformIO $ do
     Left err -> return 0
     Right f -> return $ (fromIntegral $ checkIOExamples (map f test_inputs) expected_outputs) / (fromIntegral $ length expected_outputs)
 
+{- Calculate fitness for a genotype -}
+calculateFitness :: Genotype -> Fitness
+calculateFitness = case flags_fitness_function of
+                    RefinementTypes -> refinementTypeCheck
+                    IOExamples -> evalIOExamples
+
 {- Calculate the number of examples that were correct -}
 checkIOExamples :: [Output] -> [Output] -> Int
 checkIOExamples [] [] = 0
@@ -224,9 +230,9 @@ checkIOExamples (x:xs) (y:ys)
   | otherwise = checkIOExamples xs ys
 
 {- Calculate fitness on a population -}
-calculateFitnessOp :: Population -> (Genotype -> Fitness) -> Population
-calculateFitnessOp [] _ = []
-calculateFitnessOp (ind:pop) fitnessF = (GAIndividual (genotype ind) (fitnessF (genotype ind))) : calculateFitnessOp pop fitnessF
+calculateFitnessOp :: Population -> Population
+calculateFitnessOp [] = []
+calculateFitnessOp (ind:pop) = (GAIndividual (genotype ind) (calculateFitness (genotype ind))) : calculateFitnessOp pop
                                        
 {-Makes an individual with default values-}
 createIndiv :: [Int] -> GAIndividual
@@ -241,10 +247,10 @@ createPop popCnt rndInts = createIndiv (take flags_chromosome_size rndInts) : cr
 {- Evolve the population recursively counting with genotype and
 returning a population of the best individuals of each
 generation. Hard coding tournament size and elite size TODO drop a less arbitrary value of random values than 10-}
-evolve :: Population -> [Int] -> Int -> [Float] -> (Genotype -> Fitness) -> Population
-evolve pop _ 0 _ _ = []
-evolve [] _ _ _ _ = error "Empty population"
-evolve pop rndIs gen rndDs fitnessF = bestInd pop maxInd : evolve ( generationalReplacementOp pop ( calculateFitnessOp ( mutateOp ( xoverOp ( tournamentSelectionOp (length pop) pop rndIs tournamentSize) rndDs) rndDs rndIs) fitnessF ) eliteSize) (drop (popSize * 10) rndIs) (gen - 1) (drop (popSize * 10) rndDs) fitnessF
+evolve :: Population -> [Int] -> Int -> [Float] -> Population
+evolve pop _ 0 _ = []
+evolve [] _ _ _ = error "Empty population"
+evolve pop rndIs gen rndDs = bestInd pop maxInd : evolve ( generationalReplacementOp pop ( calculateFitnessOp ( mutateOp ( xoverOp ( tournamentSelectionOp (length pop) pop rndIs tournamentSize) rndDs) rndDs rndIs) ) eliteSize) (drop (popSize * 10) rndIs) (gen - 1) (drop (popSize * 10) rndDs)
 
 {- Utility for sorting GAIndividuals in DESCENDING order-}
 sortInd :: GAIndividual -> GAIndividual -> Ordering
@@ -274,17 +280,17 @@ randoms' n gen = let (value, newGen) = randomR (0, n) gen in value:randoms' n ne
 
 {- Run n trials and return list of ints representing how many
  - generations it took to find the optimal solution -}
-runTrials :: RandomGen g => Int -> g -> (Genotype -> Fitness) -> [Maybe Int]
-runTrials 0 _ _ = []
-runTrials n gen fitnessF =
+runTrials :: RandomGen g => Int -> g -> [Maybe Int]
+runTrials 0 _ = []
+runTrials n gen =
   let (g1, g2) = split gen
     in let randNumber = randoms' flags_chromosome_range g1 :: [Int]
            randNumberD = randoms' 1.0 g1 :: [Float]
        in let pop = createPop popSize randNumber
-          in let bestInds = (evolve pop randNumber generations randNumberD fitnessF)
+          in let bestInds = (evolve pop randNumber generations randNumberD)
              in let foundGen = findIndex (\x -> fitness x == 1.0) bestInds
                 in trace (showPop bestInds)
-                  foundGen : (runTrials (n-1) g2 fitnessF)
+                  foundGen : (runTrials (n-1) g2)
 
 {- Print all the summary stats given result list -}
 printSummary :: [Maybe Int] -> IO ()
@@ -304,10 +310,7 @@ printSummary vals = do
 main = do
   _ <- $initHFlags ""
   gen <- getStdGen
-  let fitnessF = case flags_fitness_function of
-                  RefinementTypes -> refinementTypeCheck
-                  IOExamples -> evalIOExamples
-  let vals = runTrials flags_num_trials gen fitnessF
+  let vals = runTrials flags_num_trials gen
   printSummary vals
   {--
   let pop = createPop popSize randNumber
