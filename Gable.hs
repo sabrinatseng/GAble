@@ -22,6 +22,8 @@ import Statistics.Quantile (def, median, midspread)
 import HFlags
 
 {- Properties defined using command line flags -}
+defineFlag "pop_size" (10 :: Int) "Size of population"
+defineFlag "generations" (10 :: Int) "Number of generations"
 defineFlag "chromosome_size" (5 :: Int) "Number of values in the chromosome"
 defineFlag "chromosome_range" (3 :: Int) "Range of values that the chromosome can have, 0..x"
 defineFlag "num_trials" (30 :: Int) "Number of trials of GE to run"
@@ -31,8 +33,8 @@ $(return []) -- hack to fix known issue with last flag not being recognized
 
 {-properties-}
 defaultFitness = 0
-popSize = 10
-generations = 10
+--popSize = 10
+--generations = 10
 --chromosomeSize = 5
 mutationRate = 0.3
 --mutationRate = 1
@@ -273,7 +275,7 @@ evolve [] _ _ _ = return (error "Empty population")
 evolve pop rndIs gen rndDs = do
   memo <- Control.Monad.State.get
   let (newPop, memo2) = runState ( calculateFitnessOp ( mutateOp ( xoverOp ( tournamentSelectionOp (length pop) pop rndIs tournamentSize) rndDs) rndDs rndIs) ) memo
-  let (rest, memo3) = runState ( evolve ( generationalReplacementOp pop newPop eliteSize) (drop (popSize * 10) rndIs) (gen - 1) (drop (popSize * 10) rndDs) ) memo2
+  let (rest, memo3) = runState ( evolve ( generationalReplacementOp pop newPop eliteSize) (drop (flags_pop_size * 10) rndIs) (gen - 1) (drop (flags_pop_size * 10) rndDs) ) memo2
   put memo3
   return (bestInd pop maxInd : rest)
 
@@ -312,8 +314,8 @@ runTrials n gen = do
   let (g1, g2) = split gen
   let randNumber = randoms' flags_chromosome_range g1 :: [Int]
   let randNumberD = randoms' 1.0 g1 :: [Float]
-  let pop = createPop popSize randNumber
-  let (bestInds, memo2) = runState (evolve pop randNumber generations randNumberD) memo
+  let pop = createPop flags_pop_size randNumber
+  let (bestInds, memo2) = runState (evolve pop randNumber flags_generations randNumberD) memo
   let foundGen = findIndex (\x -> fitness x == 1.0) bestInds
   let (rest, memo3) = runState (runTrials (n-1) g2 ) memo2
   put memo3
@@ -323,8 +325,9 @@ runTrials n gen = do
 printSummary :: [Maybe Int] -> IO ()
 printSummary vals = do
   let failed = length $ filter isNothing vals
-  let reals = Data.Vector.fromList $ map fromIntegral (map (fromMaybe generations) vals)
+  let reals = Data.Vector.fromList $ map fromIntegral (map (fromMaybe flags_generations) vals)
   putStrLn $ show reals
+  putStrLn $ "\nSUMMARY"
   putStrLn $ "Count: " ++ (show $ length vals)
   putStrLn $ "Failed: " ++ (show failed)
   putStrLn $ "Mean: " ++ (show $ mean reals)
