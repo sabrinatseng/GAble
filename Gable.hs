@@ -22,6 +22,8 @@ import Statistics.Quantile (def, median, midspread)
 import HFlags
 
 {- Properties defined using command line flags -}
+defineFlag "pop_size" (10 :: Int) "Size of population"
+defineFlag "generations" (10 :: Int) "Number of generations"
 defineFlag "chromosome_size" (5 :: Int) "Number of values in the chromosome"
 defineFlag "chromosome_range" (3 :: Int) "Range of values that the chromosome can have, 0..x"
 defineFlag "num_trials" (30 :: Int) "Number of trials of GE to run"
@@ -31,8 +33,8 @@ $(return []) -- hack to fix known issue with last flag not being recognized
 
 {-properties-}
 defaultFitness = 0
-popSize = 10
-generations = 10
+--popSize = 10
+--generations = 10
 --chromosomeSize = 5
 mutationRate = 0.3
 --mutationRate = 1
@@ -250,7 +252,7 @@ generation. Hard coding tournament size and elite size TODO drop a less arbitrar
 evolve :: Population -> [Int] -> Int -> [Float] -> Population
 evolve pop _ 0 _ = []
 evolve [] _ _ _ = error "Empty population"
-evolve pop rndIs gen rndDs = bestInd pop maxInd : evolve ( generationalReplacementOp pop ( calculateFitnessOp ( mutateOp ( xoverOp ( tournamentSelectionOp (length pop) pop rndIs tournamentSize) rndDs) rndDs rndIs) ) eliteSize) (drop (popSize * 10) rndIs) (gen - 1) (drop (popSize * 10) rndDs)
+evolve pop rndIs gen rndDs = bestInd pop maxInd : evolve ( generationalReplacementOp pop ( calculateFitnessOp ( mutateOp ( xoverOp ( tournamentSelectionOp (length pop) pop rndIs tournamentSize) rndDs) rndDs rndIs) ) eliteSize) (drop (flags_pop_size * 10) rndIs) (gen - 1) (drop (flags_pop_size * 10) rndDs)
 
 {- Utility for sorting GAIndividuals in DESCENDING order-}
 sortInd :: GAIndividual -> GAIndividual -> Ordering
@@ -286,8 +288,8 @@ runTrials n gen =
   let (g1, g2) = split gen
     in let randNumber = randoms' flags_chromosome_range g1 :: [Int]
            randNumberD = randoms' 1.0 g1 :: [Float]
-       in let pop = createPop popSize randNumber
-          in let bestInds = (evolve pop randNumber generations randNumberD)
+       in let pop = createPop flags_pop_size randNumber
+          in let bestInds = (evolve pop randNumber flags_generations randNumberD)
              in let foundGen = findIndex (\x -> fitness x == 1.0) bestInds
                 in trace (showPop bestInds)
                   foundGen : (runTrials (n-1) g2)
@@ -296,8 +298,9 @@ runTrials n gen =
 printSummary :: [Maybe Int] -> IO ()
 printSummary vals = do
   let failed = length $ filter isNothing vals
-  let reals = Data.Vector.fromList $ map fromIntegral (map (fromMaybe generations) vals)
+  let reals = Data.Vector.fromList $ map fromIntegral (map (fromMaybe flags_generations) vals)
   putStrLn $ show reals
+  putStrLn $ "\nSUMMARY"
   putStrLn $ "Count: " ++ (show $ length vals)
   putStrLn $ "Failed: " ++ (show failed)
   putStrLn $ "Mean: " ++ (show $ mean reals)
