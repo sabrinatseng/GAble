@@ -13,7 +13,7 @@ import System.Posix.IO
 import System.IO.Unsafe
 import Data.List  
 import Data.Map (Map, member, (!), size, elemAt, fromList)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isNothing)
 import Data.Set (Set, fromList)
 import Data.Vector (fromList, Vector)
 import Debug.Trace
@@ -69,7 +69,7 @@ filterPiece = ProgramPiece "filter" filterImpl
 
 -- empty piece
 nullPiece = ProgramPiece "null" ""
-pieces = [isOddPiece, isEvenPiece, filterPiece, nullPiece]
+pieces = cycle [isOddPiece, isEvenPiece, filterPiece, nullPiece]
 
 {- input/output examples for calculating fitness -}
 type Input = [Int]
@@ -295,9 +295,11 @@ runTrials n gen =
 {- Print all the summary stats given result list -}
 printSummary :: [Maybe Int] -> IO ()
 printSummary vals = do
+  let failed = length $ filter isNothing vals
   let reals = Data.Vector.fromList $ map fromIntegral (map (fromMaybe generations) vals)
   putStrLn $ show reals
   putStrLn $ "Count: " ++ (show $ length vals)
+  putStrLn $ "Failed: " ++ (show failed)
   putStrLn $ "Mean: " ++ (show $ mean reals)
   putStrLn $ "Median: " ++ (show $ median def reals)
   putStrLn $ "Min: " ++ (show $ minimum reals)
