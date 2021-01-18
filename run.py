@@ -10,8 +10,9 @@ def main():
     # data to plot
     search_space_size = []
     avgs = {"RefinementTypes": [], "IOExamples": []}
+    errs = {"RefinementTypes": [], "IOExamples": []}
     for chromosome_size in (2, 3, 4):
-        for chromosome_range in (2, 3):
+        for chromosome_range in (3,):
             for fitness_function in ("RefinementTypes", "IOExamples"):
                 print(f"Running {fitness_function} with chromosome size {chromosome_size} and range {chromosome_range}")
                 if fitness_function == "RefinementTypes":
@@ -48,13 +49,16 @@ def main():
                 stddev = float(output[14])
                 iqr = int(float(output[16]))
                 avgs[fitness_function].append(mean)
+                errs[fitness_function].append(stddev)
                 with open(FNAME, 'a+') as f:
                     f.write(str(mean) + '\t')
+                    f.write(str(stddev) + '\t')
 
-    plt.plot(search_space_size, avgs["RefinementTypes"], label="refinement types")
-    plt.plot(search_space_size, avgs["IOExamples"], label="i/o examples")
+    plt.errorbar(search_space_size, avgs["RefinementTypes"], yerr=errs["RefinementTypes"], label="refinement types")
+    plt.errorbar(search_space_size, avgs["IOExamples"], yerr=errs["IOExamples"], label="i/o examples")
     plt.xlabel("Search Space Size")
     plt.ylabel("Number of generations")
+    plt.title("Generations to optimal solution (pop size = 10)")
     plt.legend()
     plt.show()
 
