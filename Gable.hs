@@ -8,6 +8,7 @@ import GHC.IO.Exception
 --import Control.Parallel
 import Control.Monad.State
 import Control.Monad
+import Control.DeepSeq    -- for timing computations
 import System.Random
 import System.Posix.IO
 import System.IO.Unsafe
@@ -20,6 +21,8 @@ import Debug.Trace
 import Statistics.Sample (mean, stdDev)
 import Statistics.Quantile (def, median, midspread)
 import HFlags
+import System.CPUTime
+import Text.Printf
 
 {- Properties defined using command line flags -}
 defineFlag "pop_size" (10 :: Int) "Size of population"
@@ -29,6 +32,7 @@ defineFlag "chromosome_range" (3 :: Int) "Range of values that the chromosome ca
 defineFlag "num_trials" (30 :: Int) "Number of trials of GE to run"
 data FitnessFunction = RefinementTypes | IOExamples deriving (Show, Read)
 defineEQFlag "fitness_function" [| RefinementTypes :: FitnessFunction |] "FITNESS_FUNCTION" "Fitness function for the GE"
+defineFlag "r:random_search" False "Use random search instead of GE"
 $(return []) -- hack to fix known issue with last flag not being recognized
 
 {-properties-}
@@ -36,7 +40,7 @@ defaultFitness = 0
 --popSize = 10
 --generations = 10
 --chromosomeSize = 5
-mutationRate = 0.3
+mutationRate = 0.1
 --mutationRate = 1
 crossoverRate = 0.8
 --crossoverRate = 1
@@ -321,6 +325,21 @@ runTrials n gen = do
   put memo3
   return (trace (showPop bestInds) (foundGen : rest))
 
+{- Random search: generate pop size * generations random individuals 
+ - and return index / 10 of the first individual that is optimal -}
+runTrialsRandomSearch :: RandomGen g => Int -> g -> State (Map Genotype Fitness) [Maybe Int]
+runTrialsRandomSearch 0 _ = return []
+runTrialsRandomSearch n gen = do
+  memo <- Control.Monad.State.get
+  let (g1, g2) = split gen
+  let randNumber = randoms' flags_chromosome_range g1 :: [Int]
+  let pop = createPop (flags_pop_size * flags_generations) randNumber
+  let (fitnesses, memo2) = runState (calculateFitnessOp pop) memo
+  let foundGen = fmap ((+ 1) . (`div` flags_pop_size)) (findIndex (\x -> fitness x == 1.0) fitnesses)
+  let (rest, memo3) = runState (runTrialsRandomSearch (n-1) g2) memo2
+  put memo3
+  return (foundGen : rest)
+
 {- Print all the summary stats given result list -}
 printSummary :: [Maybe Int] -> IO ()
 printSummary vals = do
@@ -342,7 +361,8 @@ printSummary vals = do
 main = do
   _ <- $initHFlags ""
   gen <- getStdGen
-  let vals = evalState (runTrials flags_num_trials gen) fitnessMemo
+  let vals = if flags_random_search then evalState (runTrialsRandomSearch flags_num_trials gen) fitnessMemo
+             else evalState (runTrials flags_num_trials gen) fitnessMemo
   printSummary vals
   {--
   let pop = createPop popSize randNumber
