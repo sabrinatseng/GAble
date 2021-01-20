@@ -8,6 +8,7 @@ import GHC.IO.Exception
 --import Control.Parallel
 --import Control.Monad.State
 import Control.Monad
+import Control.DeepSeq    -- for timing computations
 import System.Random
 import System.Posix.IO
 import System.IO.Unsafe
@@ -20,6 +21,8 @@ import Debug.Trace
 import Statistics.Sample (mean, stdDev)
 import Statistics.Quantile (def, median, midspread)
 import HFlags
+import System.CPUTime
+import Text.Printf
 
 {- Properties defined using command line flags -}
 defineFlag "pop_size" (10 :: Int) "Size of population"
@@ -36,7 +39,7 @@ defaultFitness = 0
 --popSize = 10
 --generations = 10
 --chromosomeSize = 5
-mutationRate = 0.3
+mutationRate = 0.1
 --mutationRate = 1
 crossoverRate = 0.8
 --crossoverRate = 1
@@ -217,11 +220,26 @@ evalIOExamples g = unsafePerformIO $ do
     Left err -> return 0
     Right f -> return $ (fromIntegral $ checkIOExamples (map f test_inputs) expected_outputs) / (fromIntegral $ length expected_outputs)
 
+{- Calculate fitness & write the computation time to file -}
+calculateFitnessAndTime :: Genotype -> IO Fitness
+calculateFitnessAndTime g = do
+  start <- getCPUTime
+  let fitness = case flags_fitness_function of
+                  RefinementTypes -> refinementTypeCheck g
+                  IOExamples -> evalIOExamples g
+  -- `deepseq` forces evaluation
+  end <- fitness `deepseq` getCPUTime
+  let diff = (fromIntegral (end - start)) / (10^12)
+  appendFile (show flags_fitness_function ++ "_times.txt") (printf "%0.9f\n" (diff :: Double))
+  return fitness
+
 {- Calculate fitness for a genotype -}
 calculateFitness :: Genotype -> Fitness
-calculateFitness = case flags_fitness_function of
-                    RefinementTypes -> refinementTypeCheck
-                    IOExamples -> evalIOExamples
+calculateFitness = 
+  case flags_fitness_function of
+    RefinementTypes -> refinementTypeCheck
+    IOExamples -> evalIOExamples
+  -- unsafePerformIO . calculateFitnessAndTime
 
 {- Calculate the number of examples that were correct -}
 checkIOExamples :: [Output] -> [Output] -> Int

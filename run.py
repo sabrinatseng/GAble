@@ -1,17 +1,39 @@
 import subprocess
+import sys
 import re
 import matplotlib.pyplot as plt
 
 FNAME = "data.txt"
 
-def main():
+def read_floats(fname):
+    data = []
+    with open(fname, 'r') as f:
+        s = f.readline()
+        try:
+            data.append(float(s))
+        except:
+            print("Not a number: %s" % s)
+    return data
+
+def plot_time():
+    data = [
+        read_floats("RefinementTypes_times.txt"),
+        read_floats("IOExamples_times.txt")
+        ]
+    plt.boxplot(data)
+    plt.xticks([1, 2], ["Refinement Types", "IO Examples"])
+    plt.ylabel("Time per computation (secs)")
+    plt.title("Fitness computation time for chromosome size = 3")
+    plt.show()
+
+def plot_gens():
     pop_size = 10
     generations = 10
     # data to plot
     search_space_size = []
     avgs = {"RefinementTypes": [], "IOExamples": []}
     errs = {"RefinementTypes": [], "IOExamples": []}
-    for chromosome_size in (2, 3, 4):
+    for chromosome_size in (2, 3, 4, 5):
         for chromosome_range in (3,):
             for fitness_function in ("RefinementTypes", "IOExamples"):
                 print(f"Running {fitness_function} with chromosome size {chromosome_size} and range {chromosome_range}")
@@ -63,4 +85,6 @@ def main():
     plt.show()
 
 if __name__ == "__main__":
-    main()
+    args = sys.argv
+    # plot_gens()
+    plot_time()
