@@ -172,12 +172,11 @@ showPop (ind:pop) = showInd ind ++ "\n" ++ showPop pop
 
 {- oneMax. Counting ones-}
 oneMax :: [Int] -> Int
-oneMax [] = 0
-oneMax (value:values) = value + oneMax values
+oneMax = sum
 
 {- Combine program pieces into a string. -}
 combinePieces :: [ProgramPiece] -> String
-combinePieces = unlines . (map impl)
+combinePieces = unlines . map impl
 
 {- Write string to synth file using posix file descriptors -}
 writeToFilePosix :: String -> String -> IO ()
@@ -198,7 +197,7 @@ mainPiece = unlines [
 {-# NOINLINE refinementTypeCheck #-}
 refinementTypeCheck :: Genotype -> Fitness
 refinementTypeCheck g = unsafePerformIO $ do
-  let s = (combinePieces $ map (pieces !!) g) ++ mainPiece
+  let s = combinePieces (map (pieces !!) g) ++ mainPiece
   do
     writeToFilePosix synthFileName s
     cfg <- getOpts [ synthFileName ]
@@ -209,7 +208,7 @@ refinementTypeCheck g = unsafePerformIO $ do
 {-# NOINLINE evalIOExamples #-}
 evalIOExamples :: Genotype -> Fitness
 evalIOExamples g = unsafePerformIO $ do
-  let s = (combinePieces $ map (pieces !!) g)
+  let s = combinePieces (map (pieces !!) g)
   writeToFilePosix synthFileName s
   r <- runInterpreter $ do
           loadModules [synthFileName]
@@ -219,7 +218,7 @@ evalIOExamples g = unsafePerformIO $ do
           interpret "filterEvens" (as :: ([Int] -> [Int]))
   case r of
     Left err -> return 0
-    Right f -> return $ (fromIntegral $ checkIOExamples (map f test_inputs) expected_outputs) / (fromIntegral $ length expected_outputs)
+    Right f -> return $ fromIntegral (checkIOExamples (map f test_inputs) expected_outputs) / fromIntegral (length expected_outputs)
 
 {- Calculate fitness & write the computation time to file -}
 calculateFitnessAndTime :: Genotype -> IO Fitness
@@ -230,7 +229,7 @@ calculateFitnessAndTime g = do
                   IOExamples -> evalIOExamples g
   -- `deepseq` forces evaluation
   end <- fitness `deepseq` getCPUTime
-  let diff = (fromIntegral (end - start)) / (10^12)
+  let diff = fromIntegral (end - start) / (10^12)
   appendFile (show flags_fitness_function ++ "_times.txt") (printf "%0.9f\n" (diff :: Double))
   return fitness
 
@@ -252,8 +251,7 @@ checkIOExamples (x:xs) (y:ys)
 
 {- Calculate fitness on a population -}
 calculateFitnessOp :: Population -> Population
-calculateFitnessOp [] = []
-calculateFitnessOp (ind:pop) = (GAIndividual (genotype ind) (calculateFitness (genotype ind))) : calculateFitnessOp pop
+calculateFitnessOp = map (\ind -> GAIndividual (genotype ind) (calculateFitness (genotype ind)))
                                        
 {-Makes an individual with default values-}
 createIndiv :: [Int] -> GAIndividual
@@ -321,25 +319,25 @@ runTrialsRandomSearch n gen =
   let (g1, g2) = split gen
     in let randNumber = randoms' flags_chromosome_range g1 :: [Int]
       in let pop = createPop (flags_pop_size * flags_generations) randNumber
-        in let found = elemIndex 1.0 (map (calculateFitness . genotype) pop)
-          in let gen = fmap (`div` flags_pop_size) found
+        in let found = findIndex (\x -> fitness x == 1.0) (calculateFitnessOp pop)
+          in let gen = fmap ((+1) . (`div` flags_pop_size)) found
             in gen : runTrialsRandomSearch (n-1) g2
 
 {- Print all the summary stats given result list -}
 printSummary :: [Maybe Int] -> IO ()
 printSummary vals = do
   let failed = length $ filter isNothing vals
-  let reals = Data.Vector.fromList $ map fromIntegral (map (fromMaybe flags_generations) vals)
-  putStrLn $ show reals
-  putStrLn $ "\nSUMMARY"
-  putStrLn $ "Count: " ++ (show $ length vals)
-  putStrLn $ "Failed: " ++ (show failed)
-  putStrLn $ "Mean: " ++ (show $ mean reals)
-  putStrLn $ "Median: " ++ (show $ median def reals)
-  putStrLn $ "Min: " ++ (show $ minimum reals)
-  putStrLn $ "Max: " ++ (show $ maximum reals)
-  putStrLn $ "StdDev: " ++ (show $ stdDev reals)
-  putStrLn $ "IQR: " ++ (show $ midspread def 4 reals)
+  let reals = Data.Vector.fromList $ map (fromIntegral . fromMaybe flags_generations) vals
+  print reals
+  putStrLn "\nSUMMARY"
+  putStrLn $ "Count: " ++ show (length vals)
+  putStrLn $ "Failed: " ++ show failed
+  putStrLn $ "Mean: " ++ show (mean reals)
+  putStrLn $ "Median: " ++ show (median def reals)
+  putStrLn $ "Min: " ++ show (minimum reals)
+  putStrLn $ "Max: " ++ show (maximum reals)
+  putStrLn $ "StdDev: " ++ show (stdDev reals)
+  putStrLn $ "IQR: " ++ show (midspread def 4 reals)
   return ()
 
 {- Run the GA -}
