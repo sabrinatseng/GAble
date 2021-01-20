@@ -176,12 +176,11 @@ showPop (ind:pop) = showInd ind ++ "\n" ++ showPop pop
 
 {- oneMax. Counting ones-}
 oneMax :: [Int] -> Int
-oneMax [] = 0
-oneMax (value:values) = value + oneMax values
+oneMax = sum
 
 {- Combine program pieces into a string. -}
 combinePieces :: [ProgramPiece] -> String
-combinePieces = unlines . (map impl)
+combinePieces = unlines . map impl
 
 {- Write string to synth file using posix file descriptors -}
 writeToFilePosix :: String -> String -> IO ()
@@ -202,7 +201,7 @@ mainPiece = unlines [
 {-# NOINLINE refinementTypeCheck #-}
 refinementTypeCheck :: Genotype -> Fitness
 refinementTypeCheck g = unsafePerformIO $ do
-  let s = (combinePieces $ map (pieces !!) g) ++ mainPiece
+  let s = combinePieces (map (pieces !!) g) ++ mainPiece
   do
     writeToFilePosix synthFileName s
     cfg <- getOpts [ synthFileName ]
@@ -213,7 +212,7 @@ refinementTypeCheck g = unsafePerformIO $ do
 {-# NOINLINE evalIOExamples #-}
 evalIOExamples :: Genotype -> Fitness
 evalIOExamples g = unsafePerformIO $ do
-  let s = (combinePieces $ map (pieces !!) g)
+  let s = combinePieces (map (pieces !!) g)
   writeToFilePosix synthFileName s
   r <- runInterpreter $ do
           loadModules [synthFileName]
@@ -223,7 +222,7 @@ evalIOExamples g = unsafePerformIO $ do
           interpret "filterEvens" (as :: ([Int] -> [Int]))
   case r of
     Left err -> return 0
-    Right f -> return $ (fromIntegral $ checkIOExamples (map f test_inputs) expected_outputs) / (fromIntegral $ length expected_outputs)
+    Right f -> return $ fromIntegral (checkIOExamples (map f test_inputs) expected_outputs) / fromIntegral (length expected_outputs)
 
 {- Calculate the number of examples that were correct -}
 checkIOExamples :: [Output] -> [Output] -> Int
@@ -255,7 +254,7 @@ calculateFitnessOp :: Population -> State (Map Genotype Fitness) Population
 calculateFitnessOp [] = return []
 calculateFitnessOp (ind:pop) = do
   memo <- Control.Monad.State.get
-  let (fitness, memo2) = runState (calculateFitness (genotype ind) ) memo
+  let (fitness, memo2) = runState (calculateFitness (genotype ind)) memo
   let (rest, memo3) = runState (calculateFitnessOp pop) memo2
   put memo3
   return ((GAIndividual (genotype ind) fitness) : rest)
@@ -344,17 +343,17 @@ runTrialsRandomSearch n gen = do
 printSummary :: [Maybe Int] -> IO ()
 printSummary vals = do
   let failed = length $ filter isNothing vals
-  let reals = Data.Vector.fromList $ map fromIntegral (map (fromMaybe flags_generations) vals)
-  putStrLn $ show reals
-  putStrLn $ "\nSUMMARY"
-  putStrLn $ "Count: " ++ (show $ length vals)
-  putStrLn $ "Failed: " ++ (show failed)
-  putStrLn $ "Mean: " ++ (show $ mean reals)
-  putStrLn $ "Median: " ++ (show $ median def reals)
-  putStrLn $ "Min: " ++ (show $ minimum reals)
-  putStrLn $ "Max: " ++ (show $ maximum reals)
-  putStrLn $ "StdDev: " ++ (show $ stdDev reals)
-  putStrLn $ "IQR: " ++ (show $ midspread def 4 reals)
+  let reals = Data.Vector.fromList $ map (fromIntegral . fromMaybe flags_generations) vals
+  print reals
+  putStrLn "\nSUMMARY"
+  putStrLn $ "Count: " ++ show (length vals)
+  putStrLn $ "Failed: " ++ show failed
+  putStrLn $ "Mean: " ++ show (mean reals)
+  putStrLn $ "Median: " ++ show (median def reals)
+  putStrLn $ "Min: " ++ show (minimum reals)
+  putStrLn $ "Max: " ++ show (maximum reals)
+  putStrLn $ "StdDev: " ++ show (stdDev reals)
+  putStrLn $ "IQR: " ++ show (midspread def 4 reals)
   return ()
 
 {- Run the GA -}
