@@ -35,7 +35,7 @@ def plot_gens():
     errs = {"RefinementTypes": [], "IOExamples": []}
     for chromosome_size in (2, 3, 4, 5):
         for chromosome_range in (3,):
-            for fitness_function in ("RefinementTypes", "IOExamples"):
+            for fitness_function in ("RefinementTypes", "IOExamples", "Random Search"):
                 print(f"Running {fitness_function} with chromosome size {chromosome_size} and range {chromosome_range}")
                 if fitness_function == "RefinementTypes":
                     size = (chromosome_range + 1) ** chromosome_size
@@ -51,13 +51,15 @@ def plot_gens():
                     str(pop_size),
                     "--generations",
                     str(generations),
-                    "--fitness_function",
-                    fitness_function,
                     "--chromosome_size",
                     str(chromosome_size),
                     "--chromosome_range",
                     str(chromosome_range),
                     ]
+                if fitness_function == "Random Search":
+                    args.append("-r")
+                else:
+                    args.extend(["--fitness_function", fitness_function])
                 proc = subprocess.run(args, capture_output=True, encoding="utf-8")
                 summary_idx = proc.stdout.find("SUMMARY")
                 assert(summary_idx >= 0)

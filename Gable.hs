@@ -32,6 +32,7 @@ defineFlag "chromosome_range" (3 :: Int) "Range of values that the chromosome ca
 defineFlag "num_trials" (30 :: Int) "Number of trials of GE to run"
 data FitnessFunction = RefinementTypes | IOExamples deriving (Show, Read)
 defineEQFlag "fitness_function" [| RefinementTypes :: FitnessFunction |] "FITNESS_FUNCTION" "Fitness function for the GE"
+defineFlag "r:random_search" False "Use random search instead of GE"
 $(return []) -- hack to fix known issue with last flag not being recognized
 
 {-properties-}
@@ -307,10 +308,22 @@ runTrials n gen =
     in let randNumber = randoms' flags_chromosome_range g1 :: [Int]
            randNumberD = randoms' 1.0 g1 :: [Float]
        in let pop = createPop flags_pop_size randNumber
-          in let bestInds = (evolve pop randNumber flags_generations randNumberD)
+          in let bestInds = evolve pop randNumber flags_generations randNumberD
              in let foundGen = findIndex (\x -> fitness x == 1.0) bestInds
                 in trace (showPop bestInds)
-                  foundGen : (runTrials (n-1) g2)
+                  foundGen : runTrials (n-1) g2
+
+{- Random search: generate pop size * generations random individuals 
+ - and return index / 10 of the first individual that is optimal -}
+runTrialsRandomSearch :: RandomGen g => Int -> g -> [Maybe Int]
+runTrialsRandomSearch 0 _ = []
+runTrialsRandomSearch n gen = 
+  let (g1, g2) = split gen
+    in let randNumber = randoms' flags_chromosome_range g1 :: [Int]
+      in let pop = createPop (flags_pop_size * flags_generations) randNumber
+        in let found = elemIndex 1.0 (map (calculateFitness . genotype) pop)
+          in let gen = fmap (`div` flags_pop_size) found
+            in gen : runTrialsRandomSearch (n-1) g2
 
 {- Print all the summary stats given result list -}
 printSummary :: [Maybe Int] -> IO ()
@@ -333,7 +346,8 @@ printSummary vals = do
 main = do
   _ <- $initHFlags ""
   gen <- getStdGen
-  let vals = runTrials flags_num_trials gen
+  let vals = if flags_random_search then runTrialsRandomSearch flags_num_trials gen
+             else runTrials flags_num_trials gen
   printSummary vals
   {--
   let pop = createPop popSize randNumber
