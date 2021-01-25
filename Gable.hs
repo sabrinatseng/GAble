@@ -48,33 +48,35 @@ tournamentSize = 3
 eliteSize = 2
 
 {- "program pieces" -}
-data ProgramPiece = ProgramPiece { name :: String, impl :: String } deriving (Show, Eq)
+data ProgramPiece = ProgramPiece { name :: String, impl :: String, refinement :: String } deriving (Show, Eq)
 
 {- hardcoded pieces for filter evens -}
 isOddImpl = unlines [
-  "{-@ condition :: x:Int -> {v:Bool | (v <=> (x mod 2 /= 0))} @-}",
   "condition   :: Int -> Bool",
   "condition x = x `mod` 2 /= 0"
   ]
-isOddPiece = ProgramPiece "isOdd" isOddImpl
+isOddRefinement = "{-@ condition :: x:Int -> {v:Bool | (v <=> (x mod 2 /= 0))} @-}"
+isOddPiece = ProgramPiece "isOdd" isOddImpl isOddRefinement
 
 isEvenImpl = unlines [
-  "{-@ condition :: x:Int -> {v:Bool | (v <=> (x mod 2 == 0))} @-}",
   "condition   :: Int -> Bool",
   "condition x = x `mod` 2 == 0"
   ]
-isEvenPiece = ProgramPiece "isEven" isEvenImpl
+isEvenRefinement = "{-@ condition :: x:Int -> {v:Bool | (v <=> (x mod 2 == 0))} @-}"
+isEvenPiece = ProgramPiece "isEven" isEvenImpl isEvenRefinement
 
 filterImpl = unlines [
-  "{-@ type Even = {v:Int | v mod 2 = 0} @-}",
-  "{-@ filterEvens :: [Int] -> [Even] @-}",
   "filterEvens :: [Int] -> [Int]",
   "filterEvens xs = [a | a <- xs, condition a]"
   ]
-filterPiece = ProgramPiece "filter" filterImpl
+filterRefinement = unlines [
+  "{-@ type Even = {v:Int | v mod 2 = 0} @-}",
+  "{-@ filterEvens :: [Int] -> [Even] @-}"
+  ]
+filterPiece = ProgramPiece "filter" filterImpl filterRefinement
 
 -- empty piece
-nullPiece = ProgramPiece "null" ""
+nullPiece = ProgramPiece "null" "" ""
 pieces = cycle [isOddPiece, isEvenPiece, filterPiece, nullPiece]
 
 {- input/output examples for calculating fitness -}
@@ -178,6 +180,14 @@ oneMax = sum
 combinePieces :: [ProgramPiece] -> String
 combinePieces = unlines . map impl
 
+{- Get program piece's refinement and implementation together -}
+refinementAndImpl :: ProgramPiece -> String
+refinementAndImpl p = unlines [refinement p, impl p]
+
+{- Combine program pieces along with refinements into a string. -}
+combinePiecesWithRefinement :: [ProgramPiece] -> String
+combinePiecesWithRefinement = unlines . map refinementAndImpl
+
 {- Write string to synth file using posix file descriptors -}
 writeToFilePosix :: String -> String -> IO ()
 writeToFilePosix fname s = do
@@ -197,7 +207,7 @@ mainPiece = unlines [
 {-# NOINLINE refinementTypeCheck #-}
 refinementTypeCheck :: Genotype -> Fitness
 refinementTypeCheck g = unsafePerformIO $ do
-  let s = combinePieces (map (pieces !!) g) ++ mainPiece
+  let s = combinePiecesWithRefinement (map (pieces !!) g) ++ mainPiece
   do
     writeToFilePosix synthFileName s
     cfg <- getOpts [ synthFileName ]
