@@ -3,12 +3,13 @@
 --use `ghc --make Gable.hs -package liquidhaskell -package statistics -package vector -package mtl`
 import Language.Haskell.Liquid.Liquid (runLiquid)
 import Language.Haskell.Liquid.UX.CmdLine (getOpts)
-import Language.Haskell.Interpreter
+import Language.Haskell.Interpreter (runInterpreter, loadModules, setImports, getLoadedModules, setTopLevelModules, interpret, as)
 import GHC.IO.Exception
 --import Control.Parallel
 import Control.Monad.State
 import Control.Monad
 import Control.DeepSeq    -- for timing computations
+import System.Process (readProcessWithExitCode)
 import System.Random
 import System.Posix.IO
 import System.IO.Unsafe
@@ -17,6 +18,8 @@ import Data.Map (Map, empty, insert, lookup, member, (!), size, elemAt, fromList
 import Data.Maybe (fromMaybe, isNothing)
 import Data.Set (Set, fromList)
 import Data.Vector (fromList, Vector)
+import Data.Text (Text, pack)
+import Data.Text.Internal.Search (indices)
 import Debug.Trace
 import Statistics.Sample (mean, stdDev)
 import Statistics.Quantile (def, median, midspread)
@@ -30,7 +33,7 @@ defineFlag "generations" (10 :: Int) "Number of generations"
 defineFlag "chromosome_size" (5 :: Int) "Number of values in the chromosome"
 defineFlag "chromosome_range" (3 :: Int) "Range of values that the chromosome can have, 0..x"
 defineFlag "num_trials" (30 :: Int) "Number of trials of GE to run"
-data FitnessFunction = RefinementTypes | IOExamples deriving (Show, Read)
+data FitnessFunction = RefinementTypes | RefinementTypesNew | IOExamples deriving (Show, Read)
 defineEQFlag "fitness_function" [| RefinementTypes :: FitnessFunction |] "FITNESS_FUNCTION" "Fitness function for the GE"
 defineFlag "r:random_search" False "Use random search instead of GE"
 $(return []) -- hack to fix known issue with last flag not being recognized
@@ -48,33 +51,35 @@ tournamentSize = 3
 eliteSize = 2
 
 {- "program pieces" -}
-data ProgramPiece = ProgramPiece { name :: String, impl :: String } deriving (Show, Eq)
+data ProgramPiece = ProgramPiece { name :: String, impl :: String, refinement :: String } deriving (Show, Eq)
 
 {- hardcoded pieces for filter evens -}
 isOddImpl = unlines [
-  "{-@ condition :: x:Int -> {v:Bool | (v <=> (x mod 2 /= 0))} @-}",
   "condition   :: Int -> Bool",
   "condition x = x `mod` 2 /= 0"
   ]
-isOddPiece = ProgramPiece "isOdd" isOddImpl
+isOddRefinement = "{-@ condition :: x:Int -> {v:Bool | (v <=> (x mod 2 /= 0))} @-}"
+isOddPiece = ProgramPiece "isOdd" isOddImpl isOddRefinement
 
 isEvenImpl = unlines [
-  "{-@ condition :: x:Int -> {v:Bool | (v <=> (x mod 2 == 0))} @-}",
   "condition   :: Int -> Bool",
   "condition x = x `mod` 2 == 0"
   ]
-isEvenPiece = ProgramPiece "isEven" isEvenImpl
+isEvenRefinement = "{-@ condition :: x:Int -> {v:Bool | (v <=> (x mod 2 == 0))} @-}"
+isEvenPiece = ProgramPiece "isEven" isEvenImpl isEvenRefinement
 
 filterImpl = unlines [
-  "{-@ type Even = {v:Int | v mod 2 = 0} @-}",
-  "{-@ filterEvens :: [Int] -> [Even] @-}",
   "filterEvens :: [Int] -> [Int]",
   "filterEvens xs = [a | a <- xs, condition a]"
   ]
-filterPiece = ProgramPiece "filter" filterImpl
+filterRefinement = unlines [
+  "{-@ type Even = {v:Int | v mod 2 = 0} @-}",
+  "{-@ filterEvens :: [Int] -> [Even] @-}"
+  ]
+filterPiece = ProgramPiece "filter" filterImpl filterRefinement
 
 -- empty piece
-nullPiece = ProgramPiece "null" ""
+nullPiece = ProgramPiece "null" "" ""
 pieces = cycle [isOddPiece, isEvenPiece, filterPiece, nullPiece]
 
 {- input/output examples for calculating fitness -}
@@ -182,6 +187,14 @@ oneMax = sum
 combinePieces :: [ProgramPiece] -> String
 combinePieces = unlines . map impl
 
+{- Get program piece's refinement and implementation together -}
+refinementAndImpl :: ProgramPiece -> String
+refinementAndImpl p = unlines [refinement p, impl p]
+
+{- Combine program pieces along with refinements into a string. -}
+combinePiecesWithRefinement :: [ProgramPiece] -> String
+combinePiecesWithRefinement = unlines . map refinementAndImpl
+
 {- Write string to synth file using posix file descriptors -}
 writeToFilePosix :: String -> String -> IO ()
 writeToFilePosix fname s = do
@@ -201,12 +214,38 @@ mainPiece = unlines [
 {-# NOINLINE refinementTypeCheck #-}
 refinementTypeCheck :: Genotype -> Fitness
 refinementTypeCheck g = unsafePerformIO $ do
-  let s = combinePieces (map (pieces !!) g) ++ mainPiece
+  let s = combinePiecesWithRefinement (map (pieces !!) g) ++ mainPiece
   do
     writeToFilePosix synthFileName s
     cfg <- getOpts [ synthFileName ]
     (ec, _) <- runLiquid Nothing cfg
     if ec == ExitSuccess then return 1 else return 0
+
+data RefinementErrInfo = Invalid Int | Unsafe Int deriving Eq
+{- New refinement type check where we inspect stdout -}
+refinementTypeCheckNew :: Genotype -> Fitness
+refinementTypeCheckNew g = unsafePerformIO $ do
+  let s = combinePiecesWithRefinement (map (pieces !!) g) ++ mainPiece
+  do
+    writeToFilePosix synthFileName s
+    (ec, stdout, _) <- readProcessWithExitCode "liquid" [synthFileName] ""
+    case ec of
+      ExitSuccess -> return 1
+      ExitFailure _ -> do
+        let info = getRefinementErrInfo stdout
+        let fitness = case info of
+                        Invalid count -> 0.5 - fromIntegral count / fromIntegral (2 * flags_chromosome_size)
+                        Unsafe count -> 1.0 - fromIntegral count / fromIntegral (2 * flags_chromosome_size)
+        return fitness 
+
+{- Check type of failure and count number of errors -}
+getRefinementErrInfo :: String -> RefinementErrInfo
+getRefinementErrInfo s
+  | not (null (indices (pack "LIQUID: UNSAFE") text)) = Unsafe count
+  | not (null (indices (pack "LIQUID: ERROR Invalid Source") text)) = Invalid count
+  | otherwise = error ("unexpected error output from liquid: " ++ s)
+  where text = pack s
+        count = length (indices (pack "error: ") text)
 
 {- Check input/output examples by writing to file then using eval -}
 {-# NOINLINE evalIOExamples #-}
@@ -242,6 +281,7 @@ calculateFitness g = do
       -- calculate and store in cache, then return
       let fitness = case flags_fitness_function of 
                       RefinementTypes -> refinementTypeCheck g
+                      RefinementTypesNew -> refinementTypeCheckNew g
                       IOExamples -> evalIOExamples g
       let newState = Data.Map.insert g fitness memo
       put newState
@@ -363,16 +403,3 @@ main = do
   let vals = if flags_random_search then evalState (runTrialsRandomSearch flags_num_trials gen) fitnessMemo
              else evalState (runTrials flags_num_trials gen) fitnessMemo
   printSummary vals
-  {--
-  let pop = createPop popSize randNumber
-  --putStrLn $ showPop pop
-  let newPop = [createIndiv [1..10], createIndiv [1..10]]
-  let bestInds = (evolve pop randNumber generations randNumberD) 
-  putStrLn $ showPop bestInds
-  let best = bestInd bestInds maxInd
-  putStrLn $ "best: " ++ showInd best
-  when ((fitness best) == 1) $ do
-    let s = combinePieces $ map (pieces !!) (genotype best)
-    writeToSynthFilePosix s
-    putStrLn s
-  --}
