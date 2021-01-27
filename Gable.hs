@@ -3,12 +3,13 @@
 --use `ghc --make Gable.hs -package liquidhaskell -package statistics -package vector`
 import Language.Haskell.Liquid.Liquid (runLiquid)
 import Language.Haskell.Liquid.UX.CmdLine (getOpts)
-import Language.Haskell.Interpreter
+import Language.Haskell.Interpreter (runInterpreter, loadModules, setImports, getLoadedModules, setTopLevelModules, interpret, as)
 import GHC.IO.Exception
 --import Control.Parallel
 --import Control.Monad.State
 import Control.Monad
 import Control.DeepSeq    -- for timing computations
+import System.Process (readProcessWithExitCode)
 import System.Random
 import System.Posix.IO
 import System.IO.Unsafe
@@ -17,6 +18,8 @@ import Data.Map (Map, member, (!), size, elemAt, fromList)
 import Data.Maybe (fromMaybe, isNothing)
 import Data.Set (Set, fromList)
 import Data.Vector (fromList, Vector)
+import Data.Text (Text, pack)
+import Data.Text.Internal.Search (indices)
 import Debug.Trace
 import Statistics.Sample (mean, stdDev)
 import Statistics.Quantile (def, median, midspread)
@@ -30,7 +33,7 @@ defineFlag "generations" (10 :: Int) "Number of generations"
 defineFlag "chromosome_size" (5 :: Int) "Number of values in the chromosome"
 defineFlag "chromosome_range" (3 :: Int) "Range of values that the chromosome can have, 0..x"
 defineFlag "num_trials" (30 :: Int) "Number of trials of GE to run"
-data FitnessFunction = RefinementTypes | IOExamples deriving (Show, Read)
+data FitnessFunction = RefinementTypes | RefinementTypesNew | IOExamples deriving (Show, Read)
 defineEQFlag "fitness_function" [| RefinementTypes :: FitnessFunction |] "FITNESS_FUNCTION" "Fitness function for the GE"
 defineFlag "r:random_search" False "Use random search instead of GE"
 $(return []) -- hack to fix known issue with last flag not being recognized
@@ -214,6 +217,32 @@ refinementTypeCheck g = unsafePerformIO $ do
     (ec, _) <- runLiquid Nothing cfg
     if ec == ExitSuccess then return 1 else return 0
 
+data RefinementErrInfo = Invalid Int | Unsafe Int deriving Eq
+{- New refinement type check where we inspect stdout -}
+refinementTypeCheckNew :: Genotype -> Fitness
+refinementTypeCheckNew g = unsafePerformIO $ do
+  let s = combinePiecesWithRefinement (map (pieces !!) g) ++ mainPiece
+  do
+    writeToFilePosix synthFileName s
+    (ec, stdout, _) <- readProcessWithExitCode "liquid" [synthFileName] ""
+    case ec of
+      ExitSuccess -> return 1
+      ExitFailure _ -> do
+        let info = getRefinementErrInfo stdout
+        let fitness = case info of
+                        Invalid count -> 0.5 - fromIntegral count / fromIntegral (2 * flags_chromosome_size)
+                        Unsafe count -> 1.0 - fromIntegral count / fromIntegral (2 * flags_chromosome_size)
+        return fitness 
+
+{- Check type of failure and count number of errors -}
+getRefinementErrInfo :: String -> RefinementErrInfo
+getRefinementErrInfo s
+  | not (null (indices (pack "LIQUID: UNSAFE") text)) = Unsafe count
+  | not (null (indices (pack "LIQUID: ERROR Invalid Source") text)) = Invalid count
+  | otherwise = error ("unexpected error output from liquid: " ++ s)
+  where text = pack s
+        count = length (indices (pack "error: ") text)
+
 {- Check input/output examples by writing to file then using eval -}
 {-# NOINLINE evalIOExamples #-}
 evalIOExamples :: Genotype -> Fitness
@@ -236,6 +265,7 @@ calculateFitnessAndTime g = do
   start <- getCPUTime
   let fitness = case flags_fitness_function of
                   RefinementTypes -> refinementTypeCheck g
+                  RefinementTypesNew -> refinementTypeCheckNew g
                   IOExamples -> evalIOExamples g
   -- `deepseq` forces evaluation
   end <- fitness `deepseq` getCPUTime
@@ -248,6 +278,7 @@ calculateFitness :: Genotype -> Fitness
 calculateFitness = 
   case flags_fitness_function of
     RefinementTypes -> refinementTypeCheck
+    RefinementTypesNew -> refinementTypeCheckNew
     IOExamples -> evalIOExamples
   -- unsafePerformIO . calculateFitnessAndTime
 
@@ -357,16 +388,3 @@ main = do
   let vals = if flags_random_search then runTrialsRandomSearch flags_num_trials gen
              else runTrials flags_num_trials gen
   printSummary vals
-  {--
-  let pop = createPop popSize randNumber
-  --putStrLn $ showPop pop
-  let newPop = [createIndiv [1..10], createIndiv [1..10]]
-  let bestInds = (evolve pop randNumber generations randNumberD) 
-  putStrLn $ showPop bestInds
-  let best = bestInd bestInds maxInd
-  putStrLn $ "best: " ++ showInd best
-  when ((fitness best) == 1) $ do
-    let s = combinePieces $ map (pieces !!) (genotype best)
-    writeToSynthFilePosix s
-    putStrLn s
-  --}
