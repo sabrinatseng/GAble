@@ -43,7 +43,7 @@ defaultFitness = 0
 --popSize = 10
 --generations = 10
 --chromosomeSize = 5
-mutationRate = 0.1
+mutationRate = 0.3
 --mutationRate = 1
 crossoverRate = 0.8
 --crossoverRate = 1
@@ -109,7 +109,7 @@ type Population = [GAIndividual]
  change should occur. TODO (Could be smarter an verify if a reset is needed)-}
 mutateOp :: Population -> [Float] -> [Int] -> Population
 mutateOp [] _ _ = []
-mutateOp (ind:pop) rndDs rndIs = (createIndiv (mutate'' (genotype ind) (drop (length (genotype ind)) rndDs) (drop (length (genotype ind)) rndIs))) : mutateOp pop rndDs rndIs
+mutateOp (ind:pop) rndDs rndIs = (createIndiv (mutate'' (genotype ind) (take flags_chromosome_size rndDs) (take flags_chromosome_size rndIs))) : mutateOp pop (drop flags_chromosome_size rndDs) (drop flags_chromosome_size rndIs)
 
 {- Mutate a genotype by uniformly changing the integer. -}
 mutate'' :: Genotype -> [Float] -> [Int] -> [Int]
@@ -307,10 +307,10 @@ createPop popCnt rndInts = createIndiv (take flags_chromosome_size rndInts) : cr
 {- Evolve the population recursively counting with genotype and
 returning a population of the best individuals of each
 generation. Hard coding tournament size and elite size TODO drop a less arbitrary value of random values than 10-}
-evolve :: Population -> [Int] -> Int -> [Float] -> Population
-evolve pop _ 0 _ = []
-evolve [] _ _ _ = error "Empty population"
-evolve pop rndIs gen rndDs = bestInd pop maxInd : evolve ( generationalReplacementOp pop ( calculateFitnessOp ( mutateOp ( xoverOp ( tournamentSelectionOp (length pop) pop rndIs tournamentSize) rndDs) rndDs rndIs) ) eliteSize) (drop (flags_pop_size * 10) rndIs) (gen - 1) (drop (flags_pop_size * 10) rndDs)
+evolve :: Population -> [Int] -> [Int] -> Int -> [Float] -> Population
+evolve pop _ _ 0 _ = []
+evolve [] _ _ _ _ = error "Empty population"
+evolve pop rndVs rndIs gen rndDs = bestInd pop maxInd : evolve ( generationalReplacementOp pop ( calculateFitnessOp ( mutateOp ( xoverOp ( tournamentSelectionOp (length pop) pop rndIs tournamentSize) rndDs) rndDs rndVs) ) eliteSize) (drop (flags_pop_size * 10) rndVs) (drop (flags_pop_size * 10) rndIs) (gen - 1) (drop (flags_pop_size * 10) rndDs)
 
 {- Utility for sorting GAIndividuals in DESCENDING order-}
 sortInd :: GAIndividual -> GAIndividual -> Ordering
@@ -344,10 +344,11 @@ runTrials :: RandomGen g => Int -> g -> [Maybe Int]
 runTrials 0 _ = []
 runTrials n gen =
   let (g1, g2) = split gen
-    in let randNumber = randoms' flags_chromosome_range g1 :: [Int]
+    in let randV = randoms' flags_chromosome_range g1 :: [Int]
+           randI = randoms' flags_pop_size g1 :: [Int]
            randNumberD = randoms' 1.0 g1 :: [Float]
-       in let pop = createPop flags_pop_size randNumber
-          in let bestInds = evolve pop randNumber flags_generations randNumberD
+       in let pop = createPop flags_pop_size randV
+          in let bestInds = evolve pop randV randI flags_generations randNumberD
              in let foundGen = findIndex (\x -> fitness x == 1.0) bestInds
                 in trace (showPop bestInds)
                   foundGen : runTrials (n-1) g2
