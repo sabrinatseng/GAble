@@ -43,7 +43,7 @@ defaultFitness = 0
 --popSize = 10
 --generations = 10
 --chromosomeSize = 5
-mutationRate = 0.1
+mutationRate = 0.3
 --mutationRate = 1
 crossoverRate = 0.8
 --crossoverRate = 1
@@ -113,7 +113,7 @@ fitnessMemo = Data.Map.empty
  change should occur. TODO (Could be smarter an verify if a reset is needed)-}
 mutateOp :: Population -> [Float] -> [Int] -> Population
 mutateOp [] _ _ = []
-mutateOp (ind:pop) rndDs rndIs = (createIndiv (mutate'' (genotype ind) (drop (length (genotype ind)) rndDs) (drop (length (genotype ind)) rndIs))) : mutateOp pop rndDs rndIs
+mutateOp (ind:pop) rndDs rndIs = (createIndiv (mutate'' (genotype ind) (take flags_chromosome_size rndDs) (take flags_chromosome_size rndIs))) : mutateOp pop (drop flags_chromosome_size rndDs) (drop flags_chromosome_size rndIs)
 
 {- Mutate a genotype by uniformly changing the integer. -}
 mutate'' :: Genotype -> [Float] -> [Int] -> [Int]
@@ -312,13 +312,13 @@ createPop popCnt rndInts = createIndiv (take flags_chromosome_size rndInts) : cr
 {- Evolve the population recursively counting with genotype and
 returning a population of the best individuals of each
 generation. Hard coding tournament size and elite size TODO drop a less arbitrary value of random values than 10-}
-evolve :: Population -> [Int] -> Int -> [Float] -> State (Map Genotype Fitness) Population
-evolve pop _ 0 _ = return []
-evolve [] _ _ _ = return (error "Empty population")
-evolve pop rndIs gen rndDs = do
+evolve :: Population -> [Int] -> [Int] -> Int -> [Float] -> State (Map Genotype Fitness) Population
+evolve pop _ _ 0 _ = return []
+evolve [] _ _ _ _ = return (error "Empty population")
+evolve pop rndVs rndIs gen rndDs = do
   memo <- Control.Monad.State.get
-  let (newPop, memo2) = runState ( calculateFitnessOp ( mutateOp ( xoverOp ( tournamentSelectionOp (length pop) pop rndIs tournamentSize) rndDs) rndDs rndIs) ) memo
-  let (rest, memo3) = runState ( evolve ( generationalReplacementOp pop newPop eliteSize) (drop (flags_pop_size * 10) rndIs) (gen - 1) (drop (flags_pop_size * 10) rndDs) ) memo2
+  let (newPop, memo2) = runState ( calculateFitnessOp ( mutateOp ( xoverOp ( tournamentSelectionOp (length pop) pop rndIs tournamentSize) rndDs) rndDs rndVs) ) memo
+  let (rest, memo3) = runState ( evolve ( generationalReplacementOp pop newPop eliteSize) (drop (flags_pop_size * 10) rndVs) (drop (flags_pop_size * 10) rndIs) (gen - 1) (drop (flags_pop_size * 10) rndDs) ) memo2
   put memo3
   return (bestInd pop maxInd : rest)
 
@@ -355,10 +355,11 @@ runTrials 0 _ = return []
 runTrials n gen = do
   memo <- Control.Monad.State.get
   let (g1, g2) = split gen
-  let randNumber = randoms' flags_chromosome_range g1 :: [Int]
+  let randV = randoms' flags_chromosome_range g1 :: [Int]
+  let randI = randoms' flags_pop_size g1 :: [Int]
   let randNumberD = randoms' 1.0 g1 :: [Float]
-  let pop = createPop flags_pop_size randNumber
-  let (bestInds, memo2) = runState (evolve pop randNumber flags_generations randNumberD) memo
+  let pop = createPop flags_pop_size randV
+  let (bestInds, memo2) = runState (evolve pop randV randI flags_generations randNumberD) memo
   let foundGen = findIndex (\x -> fitness x == 1.0) bestInds
   let (rest, memo3) = runState (runTrials (n-1) g2 ) memo2
   put memo3
