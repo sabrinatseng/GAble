@@ -101,12 +101,12 @@ boundImpl = unlines [
   "bound = map boundLower"
   ]
 boundRefinement = unlines [
-  "{-@ type GreaterThanTwo = {v:Int | 2 <= v} @-}",
-  "{-@ bound :: [Int] -> [GreaterThanTwo] @-}"
+  "{-@ type GreaterThan = {v:Int |" ++ show flags_chromosome_range ++ " <= v} @-}",
+  "{-@ bound :: [Int] -> [GreaterThan] @-}"
   ]
 boundPiece = ProgramPiece "bound" boundImpl boundRefinement
 
-boundPieces = [boundPiece] ++ map boundLowerPiece [1..]
+boundPieces = [nullPiece, boundPiece] ++ map boundLowerPiece [2..]
 
 {- input/output examples for calculating fitness -}
 type Input = [Int]

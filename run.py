@@ -109,12 +109,13 @@ def plot_time():
 def plot_gens():
     pop_size = 10
     generations = 10
+    problem = "Bound"
     # data to plot
     search_space_size = []
     avgs = {"RefinementTypes": [], "RefinementTypesNew": [], "IOExamples": [], "RandomSearch": []}
     errs = {"RefinementTypes": [], "RefinementTypesNew": [], "IOExamples": [], "RandomSearch": []}
-    for chromosome_size in (2, 3, 4, 5):
-        for chromosome_range in (3,):
+    for chromosome_size in (2, 3, 4,):
+        for chromosome_range in (2, 3, 4,):
             for fitness_function in ("RefinementTypes", "RefinementTypesNew", "IOExamples", "RandomSearch"):
                 print(f"Running {fitness_function} with chromosome size {chromosome_size} and range {chromosome_range}")
                 if fitness_function == "RefinementTypes":
@@ -135,6 +136,8 @@ def plot_gens():
                     str(chromosome_size),
                     "--chromosome_range",
                     str(chromosome_range),
+                    "--problem",
+                    problem,
                     ]
                 if fitness_function == "RandomSearch":
                     args.append("-r")
