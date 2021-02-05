@@ -184,7 +184,7 @@ def plot_gens():
 
 if __name__ == "__main__":
     args = sys.argv
-    # plot_gens()
+    plot_gens()
     # plot_time()
     # normality_test(args)
-    statistical_significance(args)
+    # statistical_significance(args)
