@@ -47,6 +47,7 @@ def statistical_significance(argv):
         print(f"mean: {mean}")
         print(f"median: {median}")
 
+    # Mann-Whitney U test
     U, p = mannwhitneyu(vals[fitness_function_1], vals[fitness_function_2])
     print(f"p = {p}")
 

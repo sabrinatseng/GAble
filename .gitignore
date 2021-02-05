@@ -1,0 +1,6 @@
+.liquid/
+*.o
+*.hi
+*.dyn_hi
+*.dyn_o
+*.png

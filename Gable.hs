@@ -35,6 +35,8 @@ defineFlag "chromosome_range" (3 :: Int) "Range of values that the chromosome ca
 defineFlag "num_trials" (30 :: Int) "Number of trials of GE to run"
 data FitnessFunction = RefinementTypes | RefinementTypesNew | IOExamples deriving (Show, Read)
 defineEQFlag "fitness_function" [| RefinementTypes :: FitnessFunction |] "FITNESS_FUNCTION" "Fitness function for the GE"
+data Problem = FilterEvens | Bound deriving (Show, Read)
+defineEQFlag "problem" [| FilterEvens :: Problem |] "PROBLEM" "Synthesis problem"
 defineFlag "r:random_search" False "Use random search instead of GE"
 $(return []) -- hack to fix known issue with last flag not being recognized
 
@@ -80,19 +82,57 @@ filterPiece = ProgramPiece "filter" filterImpl filterRefinement
 
 -- empty piece
 nullPiece = ProgramPiece "null" "" ""
-pieces = cycle [isOddPiece, isEvenPiece, filterPiece, nullPiece]
+filterEvensPieces = cycle [isOddPiece, isEvenPiece, filterPiece, nullPiece]
+
+{- harcoded pieces for bound -}
+boundLowerImpl :: Int -> String
+boundLowerImpl x = unlines [
+  "boundLower :: Int -> Int",
+  "boundLower = max " ++ show x
+  ]
+boundLowerRefinement :: Int -> String
+boundLowerRefinement x = "{-@ boundLower :: x:Int -> {v:Int | v >= " ++ show x ++ "} @-}"
+
+boundLowerPiece :: Int -> ProgramPiece
+boundLowerPiece x = ProgramPiece "boundLower" (boundLowerImpl x) (boundLowerRefinement x)
+
+boundImpl = unlines [
+  "bound :: [Int] -> [Int]",
+  "bound = map boundLower"
+  ]
+boundRefinement = unlines [
+  "{-@ type GreaterThanTwo = {v:Int | 2 <= v} @-}",
+  "{-@ bound :: [Int] -> [GreaterThanTwo] @-}"
+  ]
+boundPiece = ProgramPiece "bound" boundImpl boundRefinement
+
+boundPieces = [boundPiece] ++ map boundLowerPiece [1..]
 
 {- input/output examples for calculating fitness -}
 type Input = [Int]
 type Output = [Int]
-tests = [
+filterEvensTests = [
   ([0, 1, 2, 3, 4], [0, 2, 4]),
   ([1, 3, 5, 7], []),
   ([0, 2, 4, 6], [0, 2, 4, 6]),
   ([], []),
   ([3, 2, 4, 1, 5, 9], [2, 4])
   ]
-(test_inputs, expected_outputs) = unzip tests
+
+boundTests = [
+  ([0, 1, 2, 3, 4, 5], [2, 3, 4, 5]),
+  ([], [])
+  ]
+
+
+{- Program pieces and io examples, based on value of the "problem" flag -}
+pieces = case flags_problem of
+          FilterEvens -> filterEvensPieces
+          Bound -> boundPieces
+
+(test_inputs, expected_outputs) = case flags_problem of
+                                    FilterEvens -> unzip filterEvensTests
+                                    Bound -> unzip boundTests
 
 {- options for writing to file -}
 openFileFlags = OpenFileFlags { append=False, exclusive=False, noctty=False, nonBlock=False, trunc=True }
@@ -203,12 +243,21 @@ writeToFilePosix fname s = do
   closeFd synthFile
 
 {- Add a main function so refinement type check catches when something is not defined -}
-mainPiece = unlines [
+filterEvensMain = unlines [
   "test = [1, 3, 4, 6, 7, 2]",
   "main = do",
   "        putStrLn $ \"original: \" ++ show test",
   "        putStrLn $ \"evens: \" ++ show (filterEvens test)"
   ]
+boundMain = unlines [
+  "test = [0, 1, 2, 3, 4, 5, 6, 7]",
+  "main = do",
+  "         putStrLn $ \"original: \" ++ show test",
+  "         putStrLn $ \"truncated: \" ++ show (bound test)" 
+  ]
+mainPiece = case flags_problem of
+              FilterEvens -> filterEvensMain
+              Bound -> boundMain
 
 {- Use refinement type checking to calculate fitness. -}
 {-# NOINLINE refinementTypeCheck #-}
