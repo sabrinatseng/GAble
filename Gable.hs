@@ -120,10 +120,9 @@ filterEvensTests = [
   ]
 
 boundTests = [
-  ([0, 1, 2, 3, 4, 5], [2, 3, 4, 5]),
+  ([0, 1, 2, 3, 4, 5], map (max flags_chromosome_range) [0, 1, 2, 3, 4, 5]),
   ([], [])
   ]
-
 
 {- Program pieces and io examples, based on value of the "problem" flag -}
 pieces = case flags_problem of
@@ -133,6 +132,10 @@ pieces = case flags_problem of
 (test_inputs, expected_outputs) = case flags_problem of
                                     FilterEvens -> unzip filterEvensTests
                                     Bound -> unzip boundTests
+
+fnName = case flags_problem of
+          FilterEvens -> "filterEvens"
+          Bound -> "bound"
 
 {- options for writing to file -}
 openFileFlags = OpenFileFlags { append=False, exclusive=False, noctty=False, nonBlock=False, trunc=True }
@@ -303,7 +306,7 @@ evalIOExamples g = unsafePerformIO $ do
           setImports ["Prelude"]
           modules <- getLoadedModules
           setTopLevelModules modules
-          interpret "filterEvens" (as :: ([Int] -> [Int]))
+          interpret fnName (as :: ([Int] -> [Int]))
   case r of
     Left err -> return 0
     Right f -> return $ fromIntegral (checkIOExamples (map f test_inputs) expected_outputs) / fromIntegral (length expected_outputs)
