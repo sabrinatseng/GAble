@@ -5,6 +5,7 @@ import Language.Haskell.Liquid.Liquid (runLiquid)
 import Language.Haskell.Liquid.UX.CmdLine (getOpts)
 import Language.Haskell.Interpreter (runInterpreter, loadModules, setImports, getLoadedModules, setTopLevelModules, interpret, as)
 import GHC.IO.Exception
+import GHC.Float (float2Double)
 --import Control.Parallel
 import Control.Monad.State
 import Control.Monad
@@ -37,6 +38,8 @@ data FitnessFunction = RefinementTypes | RefinementTypesNew | IOExamples derivin
 defineEQFlag "fitness_function" [| RefinementTypes :: FitnessFunction |] "FITNESS_FUNCTION" "Fitness function for the GE"
 data Problem = FilterEvens | Bound deriving (Show, Read)
 defineEQFlag "problem" [| FilterEvens :: Problem |] "PROBLEM" "Synthesis problem"
+data Eval = GensToOptimal | BestFitness deriving (Show, Read)
+defineEQFlag "eval" [| GensToOptimal :: Eval |] "EVAL" "Method for eval"
 defineFlag "r:random_search" False "Use random search instead of GE"
 $(return []) -- hack to fix known issue with last flag not being recognized
 
@@ -121,6 +124,7 @@ filterEvensTests = [
 
 boundTests = [
   ([0, 1, 2, 3, 4, 5], map (max flags_chromosome_range) [0, 1, 2, 3, 4, 5]),
+  ([5, 4, 3, 2, 1, 0], map (max flags_chromosome_range) [5, 4, 3, 2, 1, 0]),
   ([], [])
   ]
 
@@ -402,7 +406,7 @@ randoms' n gen = let (value, newGen) = randomR (0, n) gen in value:randoms' n ne
 
 {- Run n trials and return list of ints representing how many
  - generations it took to find the optimal solution -}
-runTrials :: RandomGen g => Int -> g -> State (Map Genotype Fitness) [Maybe Int]
+runTrials :: RandomGen g => Int -> g -> State (Map Genotype Fitness) [Maybe Float]
 runTrials 0 _ = return []
 runTrials n gen = do
   memo <- Control.Monad.State.get
@@ -412,31 +416,35 @@ runTrials n gen = do
   let randNumberD = randoms' 1.0 g1 :: [Float]
   let pop = createPop flags_pop_size randV
   let (bestInds, memo2) = runState (evolve pop randV randI flags_generations randNumberD) memo
-  let foundGen = findIndex (\x -> fitness x == 1.0) bestInds
+  let val = case flags_eval of
+              GensToOptimal -> fmap fromIntegral $ findIndex (\x -> fitness x == 1.0) bestInds
+              BestFitness -> Just $ fitness $ bestInd bestInds maxInd
   let (rest, memo3) = runState (runTrials (n-1) g2 ) memo2
   put memo3
-  return (trace (showPop bestInds) (foundGen : rest))
+  return (trace (showPop bestInds) (val : rest))
 
 {- Random search: generate pop size * generations random individuals 
  - and return index / 10 of the first individual that is optimal -}
-runTrialsRandomSearch :: RandomGen g => Int -> g -> State (Map Genotype Fitness) [Maybe Int]
+runTrialsRandomSearch :: RandomGen g => Int -> g -> State (Map Genotype Fitness) [Maybe Float]
 runTrialsRandomSearch 0 _ = return []
 runTrialsRandomSearch n gen = do
   memo <- Control.Monad.State.get
   let (g1, g2) = split gen
   let randNumber = randoms' flags_chromosome_range g1 :: [Int]
   let pop = createPop (flags_pop_size * flags_generations) randNumber
-  let (fitnesses, memo2) = runState (calculateFitnessOp pop) memo
-  let foundGen = fmap ((+ 1) . (`div` flags_pop_size)) (findIndex (\x -> fitness x == 1.0) fitnesses)
+  let (inds, memo2) = runState (calculateFitnessOp pop) memo
+  let val = case flags_eval of 
+              GensToOptimal -> fmap fromIntegral $ fmap ((+ 1) . (`div` flags_pop_size)) (findIndex (\x -> fitness x == 1.0) inds)
+              BestFitness -> Just $ fitness $ bestInd inds maxInd
   let (rest, memo3) = runState (runTrialsRandomSearch (n-1) g2) memo2
   put memo3
-  return (foundGen : rest)
+  return (val : rest)
 
 {- Print all the summary stats given result list -}
-printSummary :: [Maybe Int] -> IO ()
+printSummary :: [Maybe Float] -> IO ()
 printSummary vals = do
   let failed = length $ filter isNothing vals
-  let reals = Data.Vector.fromList $ map (fromIntegral . fromMaybe flags_generations) vals
+  let reals = Data.Vector.fromList $ map (float2Double . fromMaybe (fromIntegral flags_generations)) vals
   print reals
   putStrLn "\nSUMMARY"
   putStrLn $ "Count: " ++ show (length vals)
