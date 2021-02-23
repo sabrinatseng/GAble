@@ -187,7 +187,7 @@ def plot_gens():
 def compare_random(argv):
     pop_size = 10
     generations = 3
-    problem = "FilterEvens"
+    problem = "MultiFilter"
     eval_ = "BestFitness"
     fitness_function = argv[1]
     # data to plot
@@ -195,8 +195,8 @@ def compare_random(argv):
     avgs = {fitness_function: [], "RandomSearch": []}
     errs = {fitness_function: [], "RandomSearch": []}
     vals = {fitness_function: [], "RandomSearch": []}
-    for chromosome_size in (4,):
-        for chromosome_range in (3, 4,):
+    for chromosome_size in (3, 4,):
+        for chromosome_range in (5,):
             for random in (False, True):
                 print(f"Running {fitness_function} with chromosome size {chromosome_size} and range {chromosome_range}")
                 if not random:

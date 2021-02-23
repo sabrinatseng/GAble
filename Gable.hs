@@ -35,11 +35,11 @@ defineFlag "chromosome_size" (5 :: Int) "Number of values in the chromosome"
 defineFlag "chromosome_range" (3 :: Int) "Range of values that the chromosome can have, 0..x"
 defineFlag "num_trials" (30 :: Int) "Number of trials of GE to run"
 data FitnessFunction = RefinementTypes | RefinementTypesNew | IOExamples deriving (Show, Read)
-defineEQFlag "fitness_function" [| RefinementTypes :: FitnessFunction |] "FITNESS_FUNCTION" "Fitness function for the GE"
-data Problem = FilterEvens | Bound deriving (Show, Read)
+defineEQFlag "fitness_function" [| RefinementTypesNew :: FitnessFunction |] "FITNESS_FUNCTION" "Fitness function for the GE"
+data Problem = FilterEvens | Bound | MultiFilter  deriving (Show, Read)
 defineEQFlag "problem" [| FilterEvens :: Problem |] "PROBLEM" "Synthesis problem"
 data Eval = GensToOptimal | BestFitness deriving (Show, Read)
-defineEQFlag "eval" [| GensToOptimal :: Eval |] "EVAL" "Method for eval"
+defineEQFlag "eval" [| BestFitness :: Eval |] "EVAL" "Method for eval"
 defineFlag "r:random_search" False "Use random search instead of GE"
 $(return []) -- hack to fix known issue with last flag not being recognized
 
@@ -111,13 +111,39 @@ boundPiece = ProgramPiece "bound" boundImpl boundRefinement
 
 boundPieces = [nullPiece, boundPiece] ++ map boundLowerPiece [2..]
 
+{- hardcoded pieces for filter_even_odd -}
+isOddImpl2 = unlines [
+  "condition2   :: Int -> Bool",
+  "condition2 x = x `mod` 2 /= 0"
+  ]
+isOddRefinement2 = "{-@ condition2 :: x:Int -> {v:Bool | (v <=> (x mod 2 /= 0))} @-}"
+isOddPiece2 = ProgramPiece "isOdd2" isOddImpl2 isOddRefinement2
+
+isEvenImpl2 = unlines [
+  "condition2   :: Int -> Bool",
+  "condition2 x = x `mod` 2 == 0"
+  ]
+isEvenRefinement2 = "{-@ condition2 :: x:Int -> {v:Bool | (v <=> (x mod 2 == 0))} @-}"
+isEvenPiece2 = ProgramPiece "isEven2" isEvenImpl2 isEvenRefinement2
+multiFilterImpl = unlines [
+  "multiFilter :: [Int] -> ([Int], [Int])",
+  "multiFilter xs = ([a | a <- xs, condition a], [a | a <- xs, condition2 a])"
+  ]
+multiFilterRefinement = unlines [
+  "{-@ type Even = {v:Int | v mod 2 = 0} @-}",
+  "{-@ type Odd = {v:Int | v mod 2 /= 0} @-}",
+  "{-@ multiFilter :: [Int] -> ([Even], [Odd]) @-}"
+  ]
+multiFilterPiece = ProgramPiece "multiFilter" multiFilterImpl multiFilterRefinement
+
+multiFilterPieces = cycle [isOddPiece, isEvenPiece, isOddPiece2, isEvenPiece2, multiFilterPiece, nullPiece]
+
 {- input/output examples for calculating fitness -}
 type Input = [Int]
 type Output = [Int]
 filterEvensTests = [
   ([0, 1, 2, 3, 4], [0, 2, 4]),
   ([1, 3, 5, 7], []),
-  ([0, 2, 4, 6], [0, 2, 4, 6]),
   ([], []),
   ([3, 2, 4, 1, 5, 9], [2, 4])
   ]
@@ -132,14 +158,17 @@ boundTests = [
 pieces = case flags_problem of
           FilterEvens -> filterEvensPieces
           Bound -> boundPieces
+          MultiFilter -> multiFilterPieces
 
 (test_inputs, expected_outputs) = case flags_problem of
                                     FilterEvens -> unzip filterEvensTests
                                     Bound -> unzip boundTests
+                                    MultiFilter -> ([], [])
 
 fnName = case flags_problem of
           FilterEvens -> "filterEvens"
           Bound -> "bound"
+          MultiFilter -> "multi_filter"
 
 {- options for writing to file -}
 openFileFlags = OpenFileFlags { append=False, exclusive=False, noctty=False, nonBlock=False, trunc=True }
@@ -262,9 +291,18 @@ boundMain = unlines [
   "         putStrLn $ \"original: \" ++ show test",
   "         putStrLn $ \"truncated: \" ++ show (bound test)" 
   ]
+multiFilterMain = unlines [
+  "test = [1, 3, 4, 6, 7, 2]",
+  "main = do",
+  "         putStrLn $ \"original: \" ++ show test",
+  "         let (evens, odds) = multiFilter test",
+  "         putStrLn $ \"evens: \" ++ show evens",
+  "         putStrLn $ \"evens: \" ++ show odds"
+  ]
 mainPiece = case flags_problem of
               FilterEvens -> filterEvensMain
               Bound -> boundMain
+              MultiFilter -> multiFilterMain
 
 {- Use refinement type checking to calculate fitness. -}
 {-# NOINLINE refinementTypeCheck #-}
