@@ -1,31 +1,34 @@
-{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeApplications #-}
+
 --use `ghc --make Gable.hs -package liquidhaskell -package statistics -package vector -package mtl`
-import Language.Haskell.Liquid.Liquid (runLiquid)
-import Language.Haskell.Liquid.UX.CmdLine (getOpts)
-import Language.Haskell.Interpreter (runInterpreter, loadModules, setImports, getLoadedModules, setTopLevelModules, interpret, as)
-import GHC.IO.Exception
-import GHC.Float (float2Double)
+
 --import Control.Parallel
-import Control.Monad.State
+
+import Control.DeepSeq -- for timing computations
 import Control.Monad
-import Control.DeepSeq    -- for timing computations
-import System.Process (readProcessWithExitCode)
-import System.Random
-import System.Posix.IO
-import System.IO.Unsafe
-import Data.List  
-import Data.Map (Map, empty, insert, lookup, member, (!), size, elemAt, fromList)
+import Control.Monad.State
+import Data.List
+import Data.Map (Map, elemAt, empty, fromList, insert, lookup, member, size, (!))
 import Data.Maybe (fromMaybe, isNothing)
 import Data.Set (Set, fromList)
-import Data.Vector (fromList, Vector)
 import Data.Text (Text, pack)
 import Data.Text.Internal.Search (indices)
+import Data.Vector (Vector, fromList)
 import Debug.Trace
-import Statistics.Sample (mean, stdDev)
-import Statistics.Quantile (def, median, midspread)
+import GHC.Float (float2Double)
+import GHC.IO.Exception
 import HFlags
+import Language.Haskell.Interpreter (as, getLoadedModules, interpret, loadModules, runInterpreter, setImports, setTopLevelModules)
+import Language.Haskell.Liquid.Liquid (runLiquid)
+import Language.Haskell.Liquid.UX.CmdLine (getOpts)
+import Statistics.Quantile (def, median, midspread)
+import Statistics.Sample (mean, stdDev)
 import System.CPUTime
+import System.IO.Unsafe
+import System.Posix.IO
+import System.Process (readProcessWithExitCode)
+import System.Random
 import Text.Printf
 
 {- Properties defined using command line flags -}
@@ -41,6 +44,7 @@ defineEQFlag "problem" [| FilterEvens :: Problem |] "PROBLEM" "Synthesis problem
 data Eval = GensToOptimal | BestFitness deriving (Show, Read)
 defineEQFlag "eval" [| BestFitness :: Eval |] "EVAL" "Method for eval"
 defineFlag "r:random_search" False "Use random search instead of GE"
+defineFlag "f:fitness_all" False "Calculate all fitness values in the space"
 $(return []) -- hack to fix known issue with last flag not being recognized
 
 {-properties-}
@@ -56,128 +60,160 @@ tournamentSize = 3
 eliteSize = 2
 
 {- "program pieces" -}
-data ProgramPiece = ProgramPiece { name :: String, impl :: String, refinement :: String } deriving (Show, Eq)
+data ProgramPiece = ProgramPiece {name :: String, impl :: String, refinement :: String} deriving (Show, Eq)
 
 {- hardcoded pieces for filter evens -}
-isOddImpl = unlines [
-  "condition   :: Int -> Bool",
-  "condition x = x `mod` 2 /= 0"
-  ]
+isOddImpl =
+  unlines
+    [ "condition   :: Int -> Bool",
+      "condition x = x `mod` 2 /= 0"
+    ]
 isOddRefinement = "{-@ condition :: x:Int -> {v:Bool | (v <=> (x mod 2 /= 0))} @-}"
 isOddPiece = ProgramPiece "isOdd" isOddImpl isOddRefinement
 
-isEvenImpl = unlines [
-  "condition   :: Int -> Bool",
-  "condition x = x `mod` 2 == 0"
-  ]
+isEvenImpl =
+  unlines
+    [ "condition   :: Int -> Bool",
+      "condition x = x `mod` 2 == 0"
+    ]
 isEvenRefinement = "{-@ condition :: x:Int -> {v:Bool | (v <=> (x mod 2 == 0))} @-}"
 isEvenPiece = ProgramPiece "isEven" isEvenImpl isEvenRefinement
 
-filterImpl = unlines [
-  "filterEvens :: [Int] -> [Int]",
-  "filterEvens xs = [a | a <- xs, condition a]"
-  ]
-filterRefinement = unlines [
-  "{-@ type Even = {v:Int | v mod 2 = 0} @-}",
-  "{-@ filterEvens :: [Int] -> [Even] @-}"
-  ]
+filterImpl =
+  unlines
+    [ "filterEvens :: [Int] -> [Int]",
+      "filterEvens xs = [a | a <- xs, condition a]"
+    ]
+filterRefinement =
+  unlines
+    [ "{-@ type Even = {v:Int | v mod 2 = 0} @-}",
+      "{-@ filterEvens :: [Int] -> [Even] @-}"
+    ]
 filterPiece = ProgramPiece "filter" filterImpl filterRefinement
 
 -- empty piece
 nullPiece = ProgramPiece "null" "" ""
+
 filterEvensPieces = cycle [isOddPiece, isEvenPiece, filterPiece, nullPiece]
 
 {- harcoded pieces for bound -}
 boundLowerImpl :: Int -> String
-boundLowerImpl x = unlines [
-  "boundLower :: Int -> Int",
-  "boundLower = max " ++ show x
-  ]
+boundLowerImpl x =
+  unlines
+    [ "boundLower :: Int -> Int",
+      "boundLower = max " ++ show x
+    ]
+
 boundLowerRefinement :: Int -> String
 boundLowerRefinement x = "{-@ boundLower :: x:Int -> {v:Int | v >= " ++ show x ++ "} @-}"
 
 boundLowerPiece :: Int -> ProgramPiece
 boundLowerPiece x = ProgramPiece "boundLower" (boundLowerImpl x) (boundLowerRefinement x)
 
-boundImpl = unlines [
-  "bound :: [Int] -> [Int]",
-  "bound = map boundLower"
-  ]
-boundRefinement = unlines [
-  "{-@ type GreaterThan = {v:Int |" ++ show flags_chromosome_range ++ " <= v} @-}",
-  "{-@ bound :: [Int] -> [GreaterThan] @-}"
-  ]
+boundImpl =
+  unlines
+    [ "bound :: [Int] -> [Int]",
+      "bound = map boundLower"
+    ]
+boundRefinement =
+  unlines
+    [ "{-@ type GreaterThan = {v:Int |" ++ show flags_chromosome_range ++ " <= v} @-}",
+      "{-@ bound :: [Int] -> [GreaterThan] @-}"
+    ]
 boundPiece = ProgramPiece "bound" boundImpl boundRefinement
 
-boundPieces = [nullPiece, boundPiece] ++ map boundLowerPiece [2..]
+boundPieces = [nullPiece, boundPiece] ++ map boundLowerPiece [2 ..]
 
-{- hardcoded pieces for filter_even_odd -}
-isOddImpl2 = unlines [
-  "condition2   :: Int -> Bool",
-  "condition2 x = x `mod` 2 /= 0"
-  ]
+{- hardcoded pieces for multi_filter -}
+isGTTwoImpl =
+  unlines
+    [ "condition :: Int -> Bool",
+      "condition x = x > 2"
+    ]
+isGTTwoRefinement = "{-@ condition :: x:Int -> {v:Bool | (v <=> x > 2)} @-}"
+isGTTwoPiece = ProgramPiece "isGTTwo" isGTTwoImpl isGTTwoRefinement
+
+isOddImpl2 =
+  unlines
+    [ "condition2   :: Int -> Bool",
+      "condition2 x = x `mod` 2 /= 0"
+    ]
 isOddRefinement2 = "{-@ condition2 :: x:Int -> {v:Bool | (v <=> (x mod 2 /= 0))} @-}"
 isOddPiece2 = ProgramPiece "isOdd2" isOddImpl2 isOddRefinement2
 
-isEvenImpl2 = unlines [
-  "condition2   :: Int -> Bool",
-  "condition2 x = x `mod` 2 == 0"
-  ]
+isEvenImpl2 =
+  unlines
+    [ "condition2   :: Int -> Bool",
+      "condition2 x = x `mod` 2 == 0"
+    ]
 isEvenRefinement2 = "{-@ condition2 :: x:Int -> {v:Bool | (v <=> (x mod 2 == 0))} @-}"
 isEvenPiece2 = ProgramPiece "isEven2" isEvenImpl2 isEvenRefinement2
-multiFilterImpl = unlines [
-  "multiFilter :: [Int] -> ([Int], [Int])",
-  "multiFilter xs = ([a | a <- xs, condition a], [a | a <- xs, condition2 a])"
-  ]
-multiFilterRefinement = unlines [
-  "{-@ type Even = {v:Int | v mod 2 = 0} @-}",
-  "{-@ type Odd = {v:Int | v mod 2 /= 0} @-}",
-  "{-@ multiFilter :: [Int] -> ([Even], [Odd]) @-}"
-  ]
+
+isGTTwoImpl2 =
+  unlines
+    [ "condition2 :: Int -> Bool",
+      "condition2 x = x > 2"
+    ]
+isGTTwoRefinement2 = "{-@ condition2 :: x:Int -> {v:Bool | (v <=> x > 2)} @-}"
+isGTTwoPiece2 = ProgramPiece "isGTTwo2" isGTTwoImpl2 isGTTwoRefinement2
+
+multiFilterImpl =
+  unlines
+    [ "multiFilter :: [Int] -> ([Int], [Int])",
+      "multiFilter xs = ([a | a <- xs, condition a], [a | a <- xs, condition2 a])"
+    ]
+multiFilterRefinement =
+  unlines
+    [ "{-@ type Even = {v:Int | v mod 2 = 0} @-}",
+      "{-@ type Odd = {v:Int | v mod 2 /= 0} @-}",
+      "{-@ multiFilter :: [Int] -> ([Even], [Odd]) @-}"
+    ]
 multiFilterPiece = ProgramPiece "multiFilter" multiFilterImpl multiFilterRefinement
 
-multiFilterPieces = cycle [isOddPiece, isEvenPiece, isOddPiece2, isEvenPiece2, multiFilterPiece, nullPiece]
+multiFilterPieces = cycle [isOddPiece, isEvenPiece, isGTTwoPiece, isOddPiece2, isEvenPiece2, isGTTwoPiece2, multiFilterPiece, nullPiece]
 
 {- input/output examples for calculating fitness -}
 type Input = [Int]
+
 type Output = [Int]
-filterEvensTests = [
-  ([0, 1, 2, 3, 4], [0, 2, 4]),
-  ([1, 3, 5, 7], []),
-  ([], []),
-  ([3, 2, 4, 1, 5, 9], [2, 4])
+
+filterEvensTests =
+  [ ([0, 1, 2, 3, 4], [0, 2, 4]),
+    ([1, 3, 5, 7], []),
+    ([], []),
+    ([3, 2, 4, 1, 5, 9], [2, 4])
   ]
 
-boundTests = [
-  ([0, 1, 2, 3, 4, 5], map (max flags_chromosome_range) [0, 1, 2, 3, 4, 5]),
-  ([5, 4, 3, 2, 1, 0], map (max flags_chromosome_range) [5, 4, 3, 2, 1, 0]),
-  ([], [])
+boundTests =
+  [ ([0, 1, 2, 3, 4, 5], map (max flags_chromosome_range) [0, 1, 2, 3, 4, 5]),
+    ([5, 4, 3, 2, 1, 0], map (max flags_chromosome_range) [5, 4, 3, 2, 1, 0]),
+    ([], [])
   ]
 
 {- Program pieces and io examples, based on value of the "problem" flag -}
 pieces = case flags_problem of
-          FilterEvens -> filterEvensPieces
-          Bound -> boundPieces
-          MultiFilter -> multiFilterPieces
+  FilterEvens -> filterEvensPieces
+  Bound -> boundPieces
+  MultiFilter -> multiFilterPieces
 
 (test_inputs, expected_outputs) = case flags_problem of
-                                    FilterEvens -> unzip filterEvensTests
-                                    Bound -> unzip boundTests
-                                    MultiFilter -> ([], [])
+  FilterEvens -> unzip filterEvensTests
+  Bound -> unzip boundTests
+  MultiFilter -> ([], [])
 
 fnName = case flags_problem of
-          FilterEvens -> "filterEvens"
-          Bound -> "bound"
-          MultiFilter -> "multi_filter"
+  FilterEvens -> "filterEvens"
+  Bound -> "bound"
+  MultiFilter -> "multi_filter"
 
 {- options for writing to file -}
-openFileFlags = OpenFileFlags { append=False, exclusive=False, noctty=False, nonBlock=False, trunc=True }
+openFileFlags = OpenFileFlags {append = False, exclusive = False, noctty = False, nonBlock = False, trunc = True}
 synthFileName = "synth.hs"
 
 type Genotype = [Int]
 type Fitness = Float
-data GAIndividual = GAIndividual { genotype :: Genotype, fitness :: Fitness } deriving (Show, Eq)
-                                            
+data GAIndividual = GAIndividual {genotype :: Genotype, fitness :: Fitness} deriving (Show, Eq)
+
 {- Type for population-}
 type Population = [GAIndividual]
 
@@ -189,41 +225,42 @@ fitnessMemo = Data.Map.empty
  change should occur. TODO (Could be smarter an verify if a reset is needed)-}
 mutateOp :: Population -> [Float] -> [Int] -> Population
 mutateOp [] _ _ = []
-mutateOp (ind:pop) rndDs rndIs = (createIndiv (mutate'' (genotype ind) (take flags_chromosome_size rndDs) (take flags_chromosome_size rndIs))) : mutateOp pop (drop flags_chromosome_size rndDs) (drop flags_chromosome_size rndIs)
+mutateOp (ind : pop) rndDs rndIs = (createIndiv (mutate'' (genotype ind) (take flags_chromosome_size rndDs) (take flags_chromosome_size rndIs))) : mutateOp pop (drop flags_chromosome_size rndDs) (drop flags_chromosome_size rndIs)
 
 {- Mutate a genotype by uniformly changing the integer. -}
 mutate'' :: Genotype -> [Float] -> [Int] -> [Int]
 mutate'' [] _ _ = []
 mutate'' _ [] _ = []
 mutate'' _ _ [] = []
-mutate'' (c:cs) (rndD:rndDs) (rndI:rndIs) = (if rndD > mutationRate then c else rndI) : mutate'' cs rndDs rndIs
+mutate'' (c : cs) (rndD : rndDs) (rndI : rndIs) = (if rndD > mutationRate then c else rndI) : mutate'' cs rndDs rndIs
 
 {- Calls crossover on the population TODO How does it handle oddnumber
  sized populations? Fold? Smarter resetting values in individual TODO hardcoding rnd drop-}
 xoverOp :: Population -> [Float] -> Population
 xoverOp [] _ = []
-xoverOp (ind1:ind2:pop) rndDs = 
-  let (child1, child2) = xover (genotype ind1,genotype ind2) (take 2 rndDs)
-  in (createIndiv child1): (createIndiv child2) : xoverOp pop (drop 2 rndDs)
-xoverOp (ind1:[]) rndDs = [ind1]         
+xoverOp (ind1 : ind2 : pop) rndDs =
+  let (child1, child2) = xover (genotype ind1, genotype ind2) (take 2 rndDs)
+   in (createIndiv child1) : (createIndiv child2) : xoverOp pop (drop 2 rndDs)
+xoverOp (ind1 : []) rndDs = [ind1]
 
 {- Singlepoint crossover, crossover probability is hardcoded-}
 xover :: (Genotype, Genotype) -> [Float] -> (Genotype, Genotype)
-xover ([],_) _ = ([],[])
-xover (_,[]) _ = ([],[])
-xover (_,_) [] = error "Empty rnd"
-xover (p1,p2) (rndD:rndDs) =  
+xover ([], _) _ = ([], [])
+xover (_, []) _ = ([], [])
+xover (_, _) [] = error "Empty rnd"
+xover (p1, p2) (rndD : rndDs) =
   if rndD < crossoverRate
-     -- Remove the used random values for the rndDs for the xopoints calls
-     then let xopoint1 = xopoint rndDs p1
-          in (take xopoint1 p1 ++ drop xopoint1 p2, take xopoint1 p2 ++ drop xopoint1 p1)
-     else (p1, p2)
-          
+    then -- Remove the used random values for the rndDs for the xopoints calls
+
+      let xopoint1 = xopoint rndDs p1
+       in (take xopoint1 p1 ++ drop xopoint1 p2, take xopoint1 p2 ++ drop xopoint1 p1)
+    else (p1, p2)
+
 {- Utility function for getting crossover point TODO Make nicerway of returning 1 as a minimum value -}
 xopoint :: [Float] -> Genotype -> Int
 xopoint [] _ = error "Empty rnd"
-xopoint _ [] = error "Empty genotype" 
-xopoint (rnd:rndDs) codons = max 1 (round $ (rnd) * (fromIntegral $ length codons))
+xopoint _ [] = error "Empty genotype"
+xopoint (rnd : rndDs) codons = max 1 (round $ (rnd) * (fromIntegral $ length codons))
 
 {- Tournament selection on a population, counting the individuals via the cnt variable TODO Better recursion?-}
 tournamentSelectionOp :: Int -> Population -> [Int] -> Int -> Population
@@ -231,29 +268,29 @@ tournamentSelectionOp 0 _ _ _ = []
 tournamentSelectionOp _ [] _ _ = error "Empty population"
 tournamentSelectionOp _ _ [] _ = error "Empty rnd"
 tournamentSelectionOp _ _ _ 0 = error "Zero tournament size" --What about minus?
-tournamentSelectionOp cnt pop rndIs tournamentSize = (bestInd (selectIndividuals rndIs pop tournamentSize) maxInd) : tournamentSelectionOp (cnt - 1) pop (drop tournamentSize rndIs) tournamentSize 
+tournamentSelectionOp cnt pop rndIs tournamentSize = (bestInd (selectIndividuals rndIs pop tournamentSize) maxInd) : tournamentSelectionOp (cnt - 1) pop (drop tournamentSize rndIs) tournamentSize
 
 {-Selection with replacement TODO (Use parital application for tournament
 selection and select individuals?-}
 selectIndividuals :: [Int] -> Population -> Int -> Population
-selectIndividuals _ _ 0 = [] 
+selectIndividuals _ _ 0 = []
 selectIndividuals _ [] _ = error "Empty population"
 selectIndividuals [] _ _ = error "Empty rnd"
-selectIndividuals (rnd:rndIs) pop tournamentSize = (pop !! (rnd `mod` (length pop) ) ) : selectIndividuals rndIs pop (tournamentSize - 1)
+selectIndividuals (rnd : rndIs) pop tournamentSize = (pop !! (rnd `mod` (length pop))) : selectIndividuals rndIs pop (tournamentSize - 1)
 
 {- Generational replacement with elites. TODO error catching-}
 generationalReplacementOp :: Population -> Population -> Int -> Population
-generationalReplacementOp orgPop newPop elites = 
-  let pop = (take elites $ sortBy sortInd orgPop ) ++ (take (length newPop - elites) $ sortBy sortInd newPop )
-  in --trace ("\n\n" ++ showPop orgPop ++ "\n" ++ showPop newPop ++ "\n" ++ showPop pop ++ "\n")
-     pop
+generationalReplacementOp orgPop newPop elites =
+  let pop = (take elites $ sortBy sortInd orgPop) ++ (take (length newPop - elites) $ sortBy sortInd newPop)
+   in --trace ("\n\n" ++ showPop orgPop ++ "\n" ++ showPop newPop ++ "\n" ++ showPop pop ++ "\n")
+      pop
 
 showInd :: GAIndividual -> String
 showInd (GAIndividual genotype fitness) = "Fit:" ++ show fitness ++ ", Genotype: " ++ show genotype
 
 showPop :: Population -> String
 showPop [] = ""
-showPop (ind:pop) = showInd ind ++ "\n" ++ showPop pop
+showPop (ind : pop) = showInd ind ++ "\n" ++ showPop pop
 
 {- oneMax. Counting ones-}
 oneMax :: [Int] -> Int
@@ -279,30 +316,44 @@ writeToFilePosix fname s = do
   closeFd synthFile
 
 {- Add a main function so refinement type check catches when something is not defined -}
-filterEvensMain = unlines [
-  "test = [1, 3, 4, 6, 7, 2]",
-  "main = do",
-  "        putStrLn $ \"original: \" ++ show test",
-  "        putStrLn $ \"evens: \" ++ show (filterEvens test)"
-  ]
-boundMain = unlines [
-  "test = [0, 1, 2, 3, 4, 5, 6, 7]",
-  "main = do",
-  "         putStrLn $ \"original: \" ++ show test",
-  "         putStrLn $ \"truncated: \" ++ show (bound test)" 
-  ]
-multiFilterMain = unlines [
-  "test = [1, 3, 4, 6, 7, 2]",
-  "main = do",
-  "         putStrLn $ \"original: \" ++ show test",
-  "         let (evens, odds) = multiFilter test",
-  "         putStrLn $ \"evens: \" ++ show evens",
-  "         putStrLn $ \"evens: \" ++ show odds"
-  ]
+filterEvensMain =
+  unlines
+    [ "test = [1, 3, 4, 6, 7, 2]",
+      "main = do",
+      "        putStrLn $ \"original: \" ++ show test",
+      "        putStrLn $ \"evens: \" ++ show (filterEvens test)"
+    ]
+
+boundMain =
+  unlines
+    [ "test = [0, 1, 2, 3, 4, 5, 6, 7]",
+      "main = do",
+      "         putStrLn $ \"original: \" ++ show test",
+      "         putStrLn $ \"truncated: \" ++ show (bound test)",
+      "         putStrLn $ \"truncated: \" ++ show (bound test)",
+      "         putStrLn $ \"truncated: \" ++ show (bound test)",
+      "         putStrLn $ \"truncated: \" ++ show (bound test)", 
+      "         putStrLn $ \"truncated: \" ++ show (bound test)",
+      "         putStrLn $ \"truncated: \" ++ show (bound test)", 
+      "         putStrLn $ \"truncated: \" ++ show (bound test)",
+      "         putStrLn $ \"truncated: \" ++ show (bound test)", 
+      "         putStrLn $ \"truncated: \" ++ show (bound test)"
+    ]
+
+multiFilterMain =
+  unlines
+    [ "test = [1, 3, 4, 6, 7, 2]",
+      "main = do",
+      "         putStrLn $ \"original: \" ++ show test",
+      "         let (evens, odds) = multiFilter test",
+      "         putStrLn $ \"evens: \" ++ show evens",
+      "         putStrLn $ \"evens: \" ++ show odds"
+    ]
+
 mainPiece = case flags_problem of
-              FilterEvens -> filterEvensMain
-              Bound -> boundMain
-              MultiFilter -> multiFilterMain
+  FilterEvens -> filterEvensMain
+  Bound -> boundMain
+  MultiFilter -> multiFilterMain
 
 {- Use refinement type checking to calculate fitness. -}
 {-# NOINLINE refinementTypeCheck #-}
@@ -311,11 +362,12 @@ refinementTypeCheck g = unsafePerformIO $ do
   let s = combinePiecesWithRefinement (map (pieces !!) g) ++ mainPiece
   do
     writeToFilePosix synthFileName s
-    cfg <- getOpts [ synthFileName ]
+    cfg <- getOpts [synthFileName]
     (ec, _) <- runLiquid Nothing cfg
     if ec == ExitSuccess then return 1 else return 0
 
-data RefinementErrInfo = Invalid Int | Unsafe Int deriving Eq
+data RefinementErrInfo = Invalid Int | Unsafe Int deriving (Eq)
+
 {- New refinement type check where we inspect stdout -}
 refinementTypeCheckNew :: Genotype -> Fitness
 refinementTypeCheckNew g = unsafePerformIO $ do
@@ -328,9 +380,9 @@ refinementTypeCheckNew g = unsafePerformIO $ do
       ExitFailure _ -> do
         let info = getRefinementErrInfo stdout
         let fitness = case info of
-                        Invalid count -> 0.5 - fromIntegral count / fromIntegral (2 * flags_chromosome_size)
-                        Unsafe count -> 1.0 - fromIntegral count / fromIntegral (2 * flags_chromosome_size)
-        return fitness 
+              Invalid count -> 0.5 - fromIntegral count / fromIntegral (2 * flags_chromosome_size)
+              Unsafe count -> 1.0 - fromIntegral count / fromIntegral (2 * flags_chromosome_size)
+        return fitness
 
 {- Check type of failure and count number of errors -}
 getRefinementErrInfo :: String -> RefinementErrInfo
@@ -338,8 +390,9 @@ getRefinementErrInfo s
   | not (null (indices (pack "LIQUID: UNSAFE") text)) = Unsafe count
   | not (null (indices (pack "LIQUID: ERROR Invalid Source") text)) = Invalid count
   | otherwise = error ("unexpected error output from liquid: " ++ s)
-  where text = pack s
-        count = length (indices (pack "error: ") text)
+  where
+    text = pack s
+    count = length (indices (pack "error: ") text)
 
 {- Check input/output examples by writing to file then using eval -}
 {-# NOINLINE evalIOExamples #-}
@@ -348,11 +401,11 @@ evalIOExamples g = unsafePerformIO $ do
   let s = combinePieces (map (pieces !!) g)
   writeToFilePosix synthFileName s
   r <- runInterpreter $ do
-          loadModules [synthFileName]
-          setImports ["Prelude"]
-          modules <- getLoadedModules
-          setTopLevelModules modules
-          interpret fnName (as :: ([Int] -> [Int]))
+    loadModules [synthFileName]
+    setImports ["Prelude"]
+    modules <- getLoadedModules
+    setTopLevelModules modules
+    interpret fnName (as :: ([Int] -> [Int]))
   case r of
     Left err -> return 0
     Right f -> return $ fromIntegral (checkIOExamples (map f test_inputs) expected_outputs) / fromIntegral (length expected_outputs)
@@ -360,9 +413,9 @@ evalIOExamples g = unsafePerformIO $ do
 {- Calculate the number of examples that were correct -}
 checkIOExamples :: [Output] -> [Output] -> Int
 checkIOExamples [] [] = 0
-checkIOExamples (x:xs) (y:ys)
+checkIOExamples (x : xs) (y : ys)
   -- first list is the actual output, second list is expected output
-  | x == y    = 1 + checkIOExamples xs ys
+  | x == y = 1 + checkIOExamples xs ys
   | otherwise = checkIOExamples xs ys
 
 {- Calculate fitness for a genotype -}
@@ -373,10 +426,10 @@ calculateFitness g = do
   case Data.Map.lookup g memo of
     Nothing -> do
       -- calculate and store in cache, then return
-      let fitness = case flags_fitness_function of 
-                      RefinementTypes -> refinementTypeCheck g
-                      RefinementTypesNew -> refinementTypeCheckNew g
-                      IOExamples -> evalIOExamples g
+      let fitness = case flags_fitness_function of
+            RefinementTypes -> refinementTypeCheck g
+            RefinementTypesNew -> refinementTypeCheckNew g
+            IOExamples -> evalIOExamples g
       let newState = Data.Map.insert g fitness memo
       put newState
       newMemo <- Control.Monad.State.get
@@ -386,13 +439,13 @@ calculateFitness g = do
 {- Calculate fitness on a population -}
 calculateFitnessOp :: Population -> State (Map Genotype Fitness) Population
 calculateFitnessOp [] = return []
-calculateFitnessOp (ind:pop) = do
+calculateFitnessOp (ind : pop) = do
   memo <- Control.Monad.State.get
   let (fitness, memo2) = runState (calculateFitness (genotype ind)) memo
   let (rest, memo3) = runState (calculateFitnessOp pop) memo2
   put memo3
   return ((GAIndividual (genotype ind) fitness) : rest)
-                                       
+
 {-Makes an individual with default values-}
 createIndiv :: [Int] -> GAIndividual
 createIndiv [] = error "creating individual with an empty chromosome"
@@ -401,8 +454,8 @@ createIndiv xs = GAIndividual xs defaultFitness
 {-creates an array of individuals with random genotypes-}
 createPop :: Int -> [Int] -> Population
 createPop 0 _ = []
-createPop popCnt rndInts = createIndiv (take flags_chromosome_size rndInts) : createPop (popCnt-1) (drop flags_chromosome_size rndInts)
-                           
+createPop popCnt rndInts = createIndiv (take flags_chromosome_size rndInts) : createPop (popCnt -1) (drop flags_chromosome_size rndInts)
+
 {- Evolve the population recursively counting with genotype and
 returning a population of the best individuals of each
 generation. Hard coding tournament size and elite size TODO drop a less arbitrary value of random values than 10-}
@@ -411,8 +464,8 @@ evolve pop _ _ 0 _ = return []
 evolve [] _ _ _ _ = return (error "Empty population")
 evolve pop rndVs rndIs gen rndDs = do
   memo <- Control.Monad.State.get
-  let (newPop, memo2) = runState ( calculateFitnessOp ( mutateOp ( xoverOp ( tournamentSelectionOp (length pop) pop rndIs tournamentSize) rndDs) rndDs rndVs) ) memo
-  let (rest, memo3) = runState ( evolve ( generationalReplacementOp pop newPop eliteSize) (drop (flags_pop_size * 10) rndVs) (drop (flags_pop_size * 10) rndIs) (gen - 1) (drop (flags_pop_size * 10) rndDs) ) memo2
+  let (newPop, memo2) = runState (calculateFitnessOp (mutateOp (xoverOp (tournamentSelectionOp (length pop) pop rndIs tournamentSize) rndDs) rndDs rndVs)) memo
+  let (rest, memo3) = runState (evolve (generationalReplacementOp pop newPop eliteSize) (drop (flags_pop_size * 10) rndVs) (drop (flags_pop_size * 10) rndIs) (gen - 1) (drop (flags_pop_size * 10) rndDs)) memo2
   put memo3
   return (bestInd pop maxInd : rest)
 
@@ -422,25 +475,25 @@ sortInd ind1 ind2
   | fitness ind1 > fitness ind2 = LT
   | fitness ind1 < fitness ind2 = GT
   | fitness ind1 == fitness ind2 = EQ
-                              
-{- Utility for finding the maximum fitness in a Population-}                           
+
+{- Utility for finding the maximum fitness in a Population-}
 maxInd :: GAIndividual -> GAIndividual -> GAIndividual
-maxInd ind1 ind2 
+maxInd ind1 ind2
   | fitness ind1 > fitness ind2 = ind1
   | otherwise = ind2
 
-{- Utility for finding the minimum fitness in a Population-}                           
+{- Utility for finding the minimum fitness in a Population-}
 minInd :: GAIndividual -> GAIndividual -> GAIndividual
-minInd ind1 ind2 
+minInd ind1 ind2
   | fitness ind1 < fitness ind2 = ind1
   | otherwise = ind2
-                
+
 bestInd :: Population -> (GAIndividual -> GAIndividual -> GAIndividual) -> GAIndividual
-bestInd (ind:pop) best = foldr best ind pop
+bestInd (ind : pop) best = foldr best ind pop
 
 {- Generates random numbers in range (0, n). -}
 randoms' :: (RandomGen g, Random a, Num a) => a -> g -> [a]
-randoms' n gen = let (value, newGen) = randomR (0, n) gen in value:randoms' n newGen
+randoms' n gen = let (value, newGen) = randomR (0, n) gen in value : randoms' n newGen
 
 {- Run n trials and return list of ints representing how many
  - generations it took to find the optimal solution -}
@@ -455,13 +508,13 @@ runTrials n gen = do
   let pop = createPop flags_pop_size randV
   let (bestInds, memo2) = runState (evolve pop randV randI flags_generations randNumberD) memo
   let val = case flags_eval of
-              GensToOptimal -> fmap fromIntegral $ findIndex (\x -> fitness x == 1.0) bestInds
-              BestFitness -> Just $ fitness $ bestInd bestInds maxInd
-  let (rest, memo3) = runState (runTrials (n-1) g2 ) memo2
+        GensToOptimal -> fmap fromIntegral $ findIndex (\x -> fitness x == 1.0) bestInds
+        BestFitness -> Just $ fitness $ bestInd bestInds maxInd
+  let (rest, memo3) = runState (runTrials (n -1) g2) memo2
   put memo3
   return (trace (showPop bestInds) (val : rest))
 
-{- Random search: generate pop size * generations random individuals 
+{- Random search: generate pop size * generations random individuals
  - and return index / 10 of the first individual that is optimal -}
 runTrialsRandomSearch :: RandomGen g => Int -> g -> State (Map Genotype Fitness) [Maybe Float]
 runTrialsRandomSearch 0 _ = return []
@@ -471,10 +524,10 @@ runTrialsRandomSearch n gen = do
   let randNumber = randoms' flags_chromosome_range g1 :: [Int]
   let pop = createPop (flags_pop_size * flags_generations) randNumber
   let (inds, memo2) = runState (calculateFitnessOp pop) memo
-  let val = case flags_eval of 
-              GensToOptimal -> fmap fromIntegral $ fmap ((+ 1) . (`div` flags_pop_size)) (findIndex (\x -> fitness x == 1.0) inds)
-              BestFitness -> Just $ fitness $ bestInd inds maxInd
-  let (rest, memo3) = runState (runTrialsRandomSearch (n-1) g2) memo2
+  let val = case flags_eval of
+        GensToOptimal -> fmap fromIntegral $ fmap ((+ 1) . (`div` flags_pop_size)) (findIndex (\x -> fitness x == 1.0) inds)
+        BestFitness -> Just $ fitness $ bestInd inds maxInd
+  let (rest, memo3) = runState (runTrialsRandomSearch (n -1) g2) memo2
   put memo3
   return (val : rest)
 
@@ -495,10 +548,23 @@ printSummary vals = do
   putStrLn $ "IQR: " ++ show (midspread def 4 reals)
   return ()
 
+{- Takes a list of genotypes and prints fitness for each one -}
+fitnessAll :: [[Int]] -> IO ()
+fitnessAll [] = return ()
+fitnessAll (x : xs) = do
+  putStrLn $ show x ++ ": " ++ show (evalState (calculateFitness x) fitnessMemo)
+  fitnessAll xs
+
 {- Run the GA -}
 main = do
   _ <- $initHFlags ""
   gen <- getStdGen
-  let vals = if flags_random_search then evalState (runTrialsRandomSearch flags_num_trials gen) fitnessMemo
-             else evalState (runTrials flags_num_trials gen) fitnessMemo
-  printSummary vals
+  if flags_fitness_all
+    then fitnessAll $ replicateM flags_chromosome_size [0..flags_chromosome_range]
+    else do
+      let vals =
+            if flags_random_search
+              then evalState (runTrialsRandomSearch flags_num_trials gen) fitnessMemo
+              else evalState (runTrials flags_num_trials gen) fitnessMemo
+      printSummary vals
+

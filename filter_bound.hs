@@ -15,7 +15,7 @@ filterEvens xs = [a | a <- xs, condition a]
 {-@ type EvenOverTwo = {v:Int | (v mod 2 = 0 && v >= 2)} @-}
 {-@ filterBound :: [Int] -> [EvenOverTwo] @-}
 filterBound :: [Int] -> [Int]
-filterBound xs = [boundLower a | a <- xs, condition a]
+filterBound xs = [boundLower a | a <- filterEvens xs]
 
 test = [0, 1, 2, 3, 4, 5, 6, 7]
 main = do

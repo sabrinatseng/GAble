@@ -196,7 +196,7 @@ def compare_random(argv):
     errs = {fitness_function: [], "RandomSearch": []}
     vals = {fitness_function: [], "RandomSearch": []}
     for chromosome_size in (3, 4,):
-        for chromosome_range in (5,):
+        for chromosome_range in (7,):
             for random in (False, True):
                 print(f"Running {fitness_function} with chromosome size {chromosome_size} and range {chromosome_range}")
                 if not random:
@@ -274,10 +274,25 @@ def compare_random(argv):
     plt.legend()
     plt.show()
 
+def fitness_hist(argv):
+    fname = argv[1]
+    fitnesses = []
+    with open(fname, 'r') as f:
+        for line in f.readlines():
+            fitness_idx = line.find(": ") + 2
+            fitness = float(line[fitness_idx:])
+            fitnesses.append(fitness)
+    
+    plt.hist(fitnesses)
+    plt.ylabel("Fitness")
+    plt.title("Fitness values")
+    plt.show()
+
 if __name__ == "__main__":
     args = sys.argv
     # plot_gens()
     # plot_time()
     # normality_test(args)
     # statistical_significance(args)
-    compare_random(args)
+    # compare_random(args)
+    fitness_hist(args)
