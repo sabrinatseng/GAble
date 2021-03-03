@@ -2,6 +2,7 @@ import subprocess
 import sys
 import re
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 from scipy.stats import shapiro, mannwhitneyu
 from ast import literal_eval
 
@@ -288,6 +289,79 @@ def fitness_hist(argv):
     plt.title("Fitness values")
     plt.show()
 
+def fitness_scatter(argv):
+    pop_size = 10
+    generations = 10
+    chromosome_size = 4
+    chromosome_range = 7
+    problem = "MultiFilter"
+    fitness_function = argv[1]
+    # data to plot
+    gens = []
+    fitnesses = []
+    random_fitnesses = []
+    num_trials = 1
+    for random in (False, True):
+        print(f"Running {fitness_function} for {problem}, with random = {random}")
+        args = [
+            "./Gable",
+            "--pop_size",
+            str(pop_size),
+            "--generations",
+            str(generations),
+            "--chromosome_size",
+            str(chromosome_size),
+            "--chromosome_range",
+            str(chromosome_range),
+            "--problem",
+            problem,
+            "--fitness_function",
+            fitness_function,
+            "--num_trials",
+            str(num_trials)
+            ]
+        if random:
+            args.append("-r")
+        proc = subprocess.run(args, capture_output=True, encoding="utf-8")
+        
+        gen = 0
+        count = 0
+        for line in proc.stderr.split('\n'):
+            fitness_start = line.find(":") + 1
+            fitness_end = line.find(",")
+            if fitness_start == -1 or fitness_end == -1:
+                # empty line
+                continue
+
+            fitness = float(line[fitness_start : fitness_end])
+            print(f"Gen {gen}, Fitness {fitness}")
+            if not random:
+                # only add to gens once
+                gens.append(gen)
+            if random:
+                random_fitnesses.append(fitness)
+            else:
+                fitnesses.append(fitness)
+
+            count += 1
+            if count == pop_size:
+                count = 0
+                gen += 1
+
+            if gen == generations:
+                break
+
+    plt.scatter(gens, fitnesses, alpha=0.1, color='b')
+    plt.scatter(gens, random_fitnesses, alpha=0.1, color='r')
+    plt.title(f"Fitnesses for {problem} with pop size {pop_size}, {num_trials} trials")
+    plt.xlabel("Generations")
+    plt.ylabel("Fitness")
+    plt.legend(handles=[
+            mpatches.Patch(color='b', label=fitness_function),
+            mpatches.Patch(color='r', label="random")
+        ])
+    plt.show()
+
 if __name__ == "__main__":
     args = sys.argv
     # plot_gens()
@@ -295,4 +369,5 @@ if __name__ == "__main__":
     # normality_test(args)
     # statistical_significance(args)
     # compare_random(args)
-    fitness_hist(args)
+    # fitness_hist(args)
+    fitness_scatter(args)

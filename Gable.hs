@@ -283,6 +283,7 @@ generationalReplacementOp :: Population -> Population -> Int -> Population
 generationalReplacementOp orgPop newPop elites =
   let pop = (take elites $ sortBy sortInd orgPop) ++ (take (length newPop - elites) $ sortBy sortInd newPop)
    in --trace ("\n\n" ++ showPop orgPop ++ "\n" ++ showPop newPop ++ "\n" ++ showPop pop ++ "\n")
+      trace (showPop pop)
       pop
 
 showInd :: GAIndividual -> String
@@ -505,13 +506,17 @@ runTrials n gen = do
   let randV = randoms' flags_chromosome_range g1 :: [Int]
   let randI = randoms' flags_pop_size g1 :: [Int]
   let randNumberD = randoms' 1.0 g1 :: [Float]
-  let pop = createPop flags_pop_size randV
-  let (bestInds, memo2) = runState (evolve pop randV randI flags_generations randNumberD) memo
+  let pop_init = createPop flags_pop_size randV
+  -- same pop, just calculate fitness on all of the individuals
+  let (pop, memo2) = runState (calculateFitnessOp pop_init) memo
+  let (bestInds, memo3) =
+        trace (showPop pop) 
+        (runState (evolve pop randV randI flags_generations randNumberD) memo2)
   let val = case flags_eval of
         GensToOptimal -> fmap fromIntegral $ findIndex (\x -> fitness x == 1.0) bestInds
         BestFitness -> Just $ fitness $ bestInd bestInds maxInd
-  let (rest, memo3) = runState (runTrials (n -1) g2) memo2
-  put memo3
+  let (rest, memo4) = runState (runTrials (n -1) g2) memo3
+  put memo4
   return (trace (showPop bestInds) (val : rest))
 
 {- Random search: generate pop size * generations random individuals
@@ -527,7 +532,9 @@ runTrialsRandomSearch n gen = do
   let val = case flags_eval of
         GensToOptimal -> fmap fromIntegral $ fmap ((+ 1) . (`div` flags_pop_size)) (findIndex (\x -> fitness x == 1.0) inds)
         BestFitness -> Just $ fitness $ bestInd inds maxInd
-  let (rest, memo3) = runState (runTrialsRandomSearch (n -1) g2) memo2
+  let (rest, memo3) = 
+        trace (showPop inds)
+        (runState (runTrialsRandomSearch (n -1) g2) memo2)
   put memo3
   return (val : rest)
 
