@@ -39,7 +39,7 @@ defineFlag "chromosome_range" (3 :: Int) "Range of values that the chromosome ca
 defineFlag "num_trials" (30 :: Int) "Number of trials of GE to run"
 data FitnessFunction = RefinementTypes | RefinementTypesNew | IOExamples deriving (Show, Read)
 defineEQFlag "fitness_function" [| RefinementTypesNew :: FitnessFunction |] "FITNESS_FUNCTION" "Fitness function for the GE"
-data Problem = FilterEvens | Bound | MultiFilter  deriving (Show, Read)
+data Problem = FilterEvens | Bound | MultiFilter2 | MultiFilter3  deriving (Show, Read)
 defineEQFlag "problem" [| FilterEvens :: Problem |] "PROBLEM" "Synthesis problem"
 data Eval = GensToOptimal | BestFitness deriving (Show, Read)
 defineEQFlag "eval" [| BestFitness :: Eval |] "EVAL" "Method for eval"
@@ -124,53 +124,59 @@ boundPiece = ProgramPiece "bound" boundImpl boundRefinement
 
 boundPieces = [nullPiece, boundPiece] ++ map boundLowerPiece [2 ..]
 
-{- hardcoded pieces for multi_filter -}
-isGTTwoImpl =
+isOddImplX x =
   unlines
-    [ "condition :: Int -> Bool",
-      "condition x = x > 2"
+    [ "condition" ++ show x ++ " :: Int -> Bool",
+      "condition" ++ show x ++ " x = x `mod` 2 /= 0"
     ]
-isGTTwoRefinement = "{-@ condition :: x:Int -> {v:Bool | (v <=> x > 2)} @-}"
-isGTTwoPiece = ProgramPiece "isGTTwo" isGTTwoImpl isGTTwoRefinement
+isOddRefinementX x = "{-@ condition" ++ show x ++ " :: x:Int -> {v:Bool | (v <=> (x mod 2 /= 0))} @-}"
+isOddPieceX x = ProgramPiece ("isOdd" ++ show x) (isOddImplX x) (isOddRefinementX x)
 
-isOddImpl2 =
+isEvenImplX x =
   unlines
-    [ "condition2   :: Int -> Bool",
-      "condition2 x = x `mod` 2 /= 0"
+    [ "condition" ++ show x ++ " :: Int -> Bool",
+      "condition" ++ show x ++ " x = x `mod` 2 == 0"
     ]
-isOddRefinement2 = "{-@ condition2 :: x:Int -> {v:Bool | (v <=> (x mod 2 /= 0))} @-}"
-isOddPiece2 = ProgramPiece "isOdd2" isOddImpl2 isOddRefinement2
+isEvenRefinementX x = "{-@ condition" ++ show x ++ " :: x:Int -> {v:Bool | (v <=> (x mod 2 == 0))} @-}"
+isEvenPieceX x = ProgramPiece ("isEven" ++ show x) (isEvenImplX x) (isEvenRefinementX x)
 
-isEvenImpl2 =
+isGTTwoImplX x =
   unlines
-    [ "condition2   :: Int -> Bool",
-      "condition2 x = x `mod` 2 == 0"
+    [ "condition" ++ show x ++ " :: Int -> Bool",
+      "condition" ++ show x ++ " x = x > 2"
     ]
-isEvenRefinement2 = "{-@ condition2 :: x:Int -> {v:Bool | (v <=> (x mod 2 == 0))} @-}"
-isEvenPiece2 = ProgramPiece "isEven2" isEvenImpl2 isEvenRefinement2
+isGTTwoRefinementX x = "{-@ condition" ++ show x ++ " :: x:Int -> {v:Bool | (v <=> x > 2)} @-}"
+isGTTwoPieceX x = ProgramPiece ("isGTTwo" ++ show x) (isGTTwoImplX x) (isGTTwoRefinementX x)
 
-isGTTwoImpl2 =
-  unlines
-    [ "condition2 :: Int -> Bool",
-      "condition2 x = x > 2"
-    ]
-isGTTwoRefinement2 = "{-@ condition2 :: x:Int -> {v:Bool | (v <=> x > 2)} @-}"
-isGTTwoPiece2 = ProgramPiece "isGTTwo2" isGTTwoImpl2 isGTTwoRefinement2
-
-multiFilterImpl =
+multiFilter2Impl =
   unlines
     [ "multiFilter :: [Int] -> ([Int], [Int])",
-      "multiFilter xs = ([a | a <- xs, condition a], [a | a <- xs, condition2 a])"
+      "multiFilter xs = ([a | a <- xs, condition1 a], [a | a <- xs, condition2 a])"
     ]
-multiFilterRefinement =
+multiFilter2Refinement =
   unlines
     [ "{-@ type Even = {v:Int | v mod 2 = 0} @-}",
       "{-@ type Odd = {v:Int | v mod 2 /= 0} @-}",
       "{-@ multiFilter :: [Int] -> ([Even], [Odd]) @-}"
     ]
-multiFilterPiece = ProgramPiece "multiFilter" multiFilterImpl multiFilterRefinement
+multiFilter2Piece = ProgramPiece "multiFilter2" multiFilter2Impl multiFilter2Refinement
 
-multiFilterPieces = cycle [isOddPiece, isEvenPiece, isGTTwoPiece, isOddPiece2, isEvenPiece2, isGTTwoPiece2, multiFilterPiece, nullPiece]
+multiFilter3Impl =
+  unlines
+    [ "multiFilter :: [Int] -> ([Int], [Int], [Int])",
+      "multiFilter xs = ([a | a <- xs, condition1 a], [a | a <- xs, condition2 a], [a | a <- xs, condition3 a])"
+    ]
+multiFilter3Refinement =
+  unlines
+    [ "{-@ type Even = {v:Int | v mod 2 = 0} @-}",
+      "{-@ type Odd = {v:Int | v mod 2 /= 0} @-}",
+      "{-@ type GT2 = {v:Int | v > 2} @-}",
+      "{-@ multiFilter :: [Int] -> ([Even], [Odd], [GT2]) @-}"
+    ]
+multiFilter3Piece = ProgramPiece "multiFilter3" multiFilter3Impl multiFilter3Refinement
+
+multiFilter2Pieces = cycle [isOddPieceX 1, isEvenPieceX 1, isGTTwoPieceX 1, isOddPieceX 2, isEvenPieceX 2, isGTTwoPieceX 2, multiFilter2Piece, nullPiece]
+multiFilter3Pieces = cycle [isOddPieceX 1, isEvenPieceX 1, isGTTwoPieceX 1, isOddPieceX 2, isEvenPieceX 2, isGTTwoPieceX 2, isOddPieceX 3, isEvenPieceX 3, isGTTwoPieceX 3, multiFilter3Piece, nullPiece]
 
 {- input/output examples for calculating fitness -}
 type Input = [Int]
@@ -194,17 +200,21 @@ boundTests =
 pieces = case flags_problem of
   FilterEvens -> filterEvensPieces
   Bound -> boundPieces
-  MultiFilter -> multiFilterPieces
+  MultiFilter2 -> multiFilter2Pieces
+  MultiFilter3 -> multiFilter3Pieces
 
 (test_inputs, expected_outputs) = case flags_problem of
   FilterEvens -> unzip filterEvensTests
   Bound -> unzip boundTests
-  MultiFilter -> ([], [])
+  -- TODO multi filter tests have to be handled differently
+  MultiFilter2 -> ([], [])
+  MultiFilter3 -> ([], [])
 
 fnName = case flags_problem of
   FilterEvens -> "filterEvens"
   Bound -> "bound"
-  MultiFilter -> "multi_filter"
+  MultiFilter2 -> "multi_filter"
+  MultiFilter3 -> "multi_filter"
 
 {- options for writing to file -}
 openFileFlags = OpenFileFlags {append = False, exclusive = False, noctty = False, nonBlock = False, trunc = True}
@@ -341,20 +351,32 @@ boundMain =
       "         putStrLn $ \"truncated: \" ++ show (bound test)"
     ]
 
-multiFilterMain =
+multiFilter2Main =
   unlines
     [ "test = [1, 3, 4, 6, 7, 2]",
       "main = do",
       "         putStrLn $ \"original: \" ++ show test",
       "         let (evens, odds) = multiFilter test",
       "         putStrLn $ \"evens: \" ++ show evens",
-      "         putStrLn $ \"evens: \" ++ show odds"
+      "         putStrLn $ \"odds: \" ++ show odds"
+    ]
+
+multiFilter3Main =
+  unlines
+    [ "test = [1, 3, 4, 6, 7, 2]",
+      "main = do",
+      "         putStrLn $ \"original: \" ++ show test",
+      "         let (evens, odds, gt2) = multiFilter test",
+      "         putStrLn $ \"evens: \" ++ show evens",
+      "         putStrLn $ \"odds: \" ++ show odds",
+      "         putStrLn $ \"gt2: \" ++ show gt2"
     ]
 
 mainPiece = case flags_problem of
   FilterEvens -> filterEvensMain
   Bound -> boundMain
-  MultiFilter -> multiFilterMain
+  MultiFilter2 -> multiFilter2Main
+  MultiFilter3 -> multiFilter3Main
 
 {- Use refinement type checking to calculate fitness. -}
 {-# NOINLINE refinementTypeCheck #-}
