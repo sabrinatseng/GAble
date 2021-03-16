@@ -1,16 +1,7 @@
 Read me for GAble
 
-SETUP
-Run through ghci or
-
-Compile
-ghc --make -o Gable Gable.hs
-
-Change permissions
-chmod o+x Gable
-
-Run
-./Gable
+Run with `cabal run`
+to pass args, `cabal run . -- --fname=synth1.hs`
 
 Set
 TODO:
