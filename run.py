@@ -187,8 +187,8 @@ def plot_gens():
 
 def compare_random(argv):
     pop_size = 10
-    generations = 3
-    problem = "MultiFilter"
+    generations = 8
+    problem = "MultiFilter2"
     eval_ = "BestFitness"
     fitness_function = argv[1]
     # data to plot
@@ -196,8 +196,8 @@ def compare_random(argv):
     avgs = {fitness_function: [], "RandomSearch": []}
     errs = {fitness_function: [], "RandomSearch": []}
     vals = {fitness_function: [], "RandomSearch": []}
-    for chromosome_size in (3, 4,):
-        for chromosome_range in (7,):
+    for chromosome_size in (5,):
+        for chromosome_range in (9,):
             for random in (False, True):
                 print(f"Running {fitness_function} with chromosome size {chromosome_size} and range {chromosome_range}")
                 if not random:
@@ -284,8 +284,9 @@ def fitness_hist(argv):
             fitness = float(line[fitness_idx:])
             fitnesses.append(fitness)
     
-    plt.hist(fitnesses)
-    plt.ylabel("Fitness")
+    plt.hist(fitnesses, bins=10)
+    plt.xlabel("Fitness")
+    plt.ylabel("Number of individuals")
     plt.title("Fitness values")
     plt.show()
 
@@ -324,6 +325,7 @@ def fitness_scatter(argv):
             args.append("-r")
         proc = subprocess.run(args, capture_output=True, encoding="utf-8")
         
+        trial = 0
         gen = 0
         count = 0
         for line in proc.stderr.split('\n'):
@@ -335,7 +337,7 @@ def fitness_scatter(argv):
 
             fitness = float(line[fitness_start : fitness_end])
             print(f"Gen {gen}, Fitness {fitness}")
-            if not random:
+            if random:
                 # only add to gens once
                 gens.append(gen)
             if random:
@@ -349,11 +351,15 @@ def fitness_scatter(argv):
                 gen += 1
 
             if gen == generations:
+                gen = 0
+                trial += 1
+            
+            if trial == num_trials:
                 break
 
     plt.scatter(gens, fitnesses, alpha=0.1, color='b')
     plt.scatter(gens, random_fitnesses, alpha=0.1, color='r')
-    plt.title(f"Fitnesses for {problem} with pop size {pop_size}, {num_trials} trials")
+    plt.title(f"{problem}: pop size {pop_size}, {num_trials} trials, size {chromosome_size}, range {chromosome_range}")
     plt.xlabel("Generations")
     plt.ylabel("Fitness")
     plt.legend(handles=[
@@ -368,6 +374,6 @@ if __name__ == "__main__":
     # plot_time()
     # normality_test(args)
     # statistical_significance(args)
-    # compare_random(args)
+    compare_random(args)
     # fitness_hist(args)
-    fitness_scatter(args)
+    # fitness_scatter(args)

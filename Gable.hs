@@ -5,7 +5,7 @@
 
 --import Control.Parallel
 
-import Control.DeepSeq -- for timing computations
+-- import Control.DeepSeq -- for timing computations
 import Control.Monad
 import Control.Monad.State
 import Data.List
@@ -43,6 +43,7 @@ data Problem = FilterEvens | Bound | MultiFilter2 | MultiFilter3  deriving (Show
 defineEQFlag "problem" [| FilterEvens :: Problem |] "PROBLEM" "Synthesis problem"
 data Eval = GensToOptimal | BestFitness deriving (Show, Read)
 defineEQFlag "eval" [| BestFitness :: Eval |] "EVAL" "Method for eval"
+defineFlag "fname" ("synth.hs" :: String) "Filename to use for synthesis / liquid checking"
 defineFlag "r:random_search" False "Use random search instead of GE"
 defineFlag "f:fitness_all" False "Calculate all fitness values in the space"
 $(return []) -- hack to fix known issue with last flag not being recognized
@@ -148,34 +149,74 @@ isGTTwoImplX x =
 isGTTwoRefinementX x = "{-@ condition" ++ show x ++ " :: x:Int -> {v:Bool | (v <=> x > 2)} @-}"
 isGTTwoPieceX x = ProgramPiece ("isGTTwo" ++ show x) (isGTTwoImplX x) (isGTTwoRefinementX x)
 
+filter1Impl = 
+  unlines
+    [ "filter1 :: [Int] -> [Int]",
+      "filter1 xs = [x | x <- xs, condition1 x]"
+    ]
+filter1Refinement =
+  unlines
+    [ "{-@ type Even = {v:Int | v mod 2 = 0} @-}",
+      "{-@ filter1 :: [Int] -> [Even] @-}"
+    ]
+filter1Piece = ProgramPiece "filter1" filter1Impl filter1Refinement
+
+filter2Impl = 
+  unlines
+    [ "filter2 :: [Int] -> [Int]",
+      "filter2 xs = [x | x <- xs, condition2 x]"
+    ]
+filter2Refinement =
+  unlines
+    [ "{-@ type Odd = {v:Int | v mod 2 /= 0} @-}",
+      "{-@ filter2 :: [Int] -> [Odd] @-}"
+    ]
+filter2Piece = ProgramPiece "filter2" filter2Impl filter2Refinement
+
+filter3Impl = 
+  unlines
+    [ "filter3 :: [Int] -> [Int]",
+      "filter3 xs = [x | x <- xs, condition3 x]"
+    ]
+filter3Refinement =
+  unlines
+    [ "{-@ type GT2 = {v:Int | v > 2} @-}",
+      "{-@ filter2 :: [Int] -> [GT2] @-}"
+    ]
+filter3Piece = ProgramPiece "filter3" filter3Impl filter3Refinement
+
 multiFilter2Impl =
   unlines
     [ "multiFilter :: [Int] -> ([Int], [Int])",
-      "multiFilter xs = ([a | a <- xs, condition1 a], [a | a <- xs, condition2 a])"
+      "multiFilter xs = (filter1 xs, filter2 xs)"
     ]
-multiFilter2Refinement =
-  unlines
-    [ "{-@ type Even = {v:Int | v mod 2 = 0} @-}",
-      "{-@ type Odd = {v:Int | v mod 2 /= 0} @-}",
-      "{-@ multiFilter :: [Int] -> ([Even], [Odd]) @-}"
-    ]
+multiFilter2Refinement = "{-@ multiFilter :: [Int] -> ([Even], [Odd]) @-}"
 multiFilter2Piece = ProgramPiece "multiFilter2" multiFilter2Impl multiFilter2Refinement
 
 multiFilter3Impl =
   unlines
-    [ "multiFilter :: [Int] -> ([Int], [Int], [Int])",
-      "multiFilter xs = ([a | a <- xs, condition1 a], [a | a <- xs, condition2 a], [a | a <- xs, condition3 a])"
+    [ "filter1 :: [Int] -> [Int]",
+      "filter1 xs = [x | x <- xs, condition1 x]",
+      "filter2 :: [Int] -> [Int]",
+      "filter2 xs = [x | x <- xs, condition2 x]",
+      "filter3 :: [Int] -> [Int]",
+      "filter3 xs = [x | x <- xs, condition3 x]",
+      "multiFilter :: [Int] -> ([Int], [Int], [Int])",
+      "multiFilter xs = (filter1 xs, filter2 xs, filter3 xs)"
     ]
 multiFilter3Refinement =
   unlines
     [ "{-@ type Even = {v:Int | v mod 2 = 0} @-}",
       "{-@ type Odd = {v:Int | v mod 2 /= 0} @-}",
       "{-@ type GT2 = {v:Int | v > 2} @-}",
+      "{-@ filter1 :: [Int] -> [Even] @-}",
+      "{-@ filter2 :: [Int] -> [Odd] @-}",
+      "{-@ filter3 :: [Int] -> [GT2] @-}",
       "{-@ multiFilter :: [Int] -> ([Even], [Odd], [GT2]) @-}"
     ]
 multiFilter3Piece = ProgramPiece "multiFilter3" multiFilter3Impl multiFilter3Refinement
 
-multiFilter2Pieces = cycle [isOddPieceX 1, isEvenPieceX 1, isGTTwoPieceX 1, isOddPieceX 2, isEvenPieceX 2, isGTTwoPieceX 2, multiFilter2Piece, nullPiece]
+multiFilter2Pieces = cycle [isOddPieceX 1, isEvenPieceX 1, isGTTwoPieceX 1, isOddPieceX 2, isEvenPieceX 2, isGTTwoPieceX 2, filter1Piece, filter2Piece, multiFilter2Piece, nullPiece]
 multiFilter3Pieces = cycle [isOddPieceX 1, isEvenPieceX 1, isGTTwoPieceX 1, isOddPieceX 2, isEvenPieceX 2, isGTTwoPieceX 2, isOddPieceX 3, isEvenPieceX 3, isGTTwoPieceX 3, multiFilter3Piece, nullPiece]
 
 {- input/output examples for calculating fitness -}
@@ -218,7 +259,6 @@ fnName = case flags_problem of
 
 {- options for writing to file -}
 openFileFlags = OpenFileFlags {append = False, exclusive = False, noctty = False, nonBlock = False, trunc = True}
-synthFileName = "synth.hs"
 
 type Genotype = [Int]
 type Fitness = Float
@@ -384,8 +424,8 @@ refinementTypeCheck :: Genotype -> Fitness
 refinementTypeCheck g = unsafePerformIO $ do
   let s = combinePiecesWithRefinement (map (pieces !!) g) ++ mainPiece
   do
-    writeToFilePosix synthFileName s
-    cfg <- getOpts [synthFileName]
+    writeToFilePosix flags_fname s
+    cfg <- getOpts [flags_fname]
     (ec, _) <- runLiquid Nothing cfg
     if ec == ExitSuccess then return 1 else return 0
 
@@ -396,8 +436,8 @@ refinementTypeCheckNew :: Genotype -> Fitness
 refinementTypeCheckNew g = unsafePerformIO $ do
   let s = combinePiecesWithRefinement (map (pieces !!) g) ++ mainPiece
   do
-    writeToFilePosix synthFileName s
-    (ec, stdout, _) <- readProcessWithExitCode "liquid" [synthFileName] ""
+    writeToFilePosix flags_fname s
+    (ec, stdout, _) <- readProcessWithExitCode "liquid" [flags_fname] ""
     case ec of
       ExitSuccess -> return 1
       ExitFailure _ -> do
@@ -422,9 +462,9 @@ getRefinementErrInfo s
 evalIOExamples :: Genotype -> Fitness
 evalIOExamples g = unsafePerformIO $ do
   let s = combinePieces (map (pieces !!) g)
-  writeToFilePosix synthFileName s
+  writeToFilePosix flags_fname s
   r <- runInterpreter $ do
-    loadModules [synthFileName]
+    loadModules [flags_fname]
     setImports ["Prelude"]
     modules <- getLoadedModules
     setTopLevelModules modules
@@ -588,6 +628,7 @@ fitnessAll (x : xs) = do
 main = do
   _ <- $initHFlags ""
   gen <- getStdGen
+  -- print $ evalState (calculateFitness [1, 1, 1, 1, 1]) fitnessMemo
   if flags_fitness_all
     then fitnessAll $ replicateM flags_chromosome_size [0..flags_chromosome_range]
     else do
