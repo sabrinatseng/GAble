@@ -27,6 +27,7 @@ import Statistics.Sample (mean, stdDev)
 import System.CPUTime
 import System.IO.Unsafe
 import System.Posix.IO
+import System.Posix.Files (ownerModes)
 import System.Process (readProcessWithExitCode)
 import System.Random
 import Text.Printf
@@ -362,7 +363,7 @@ combinePiecesWithRefinement = unlines . map refinementAndImpl
 {- Write string to synth file using posix file descriptors -}
 writeToFilePosix :: String -> String -> IO ()
 writeToFilePosix fname s = do
-  synthFile <- openFd fname WriteOnly Nothing openFileFlags
+  synthFile <- openFd fname WriteOnly (Just ownerModes) openFileFlags
   fdWrite synthFile s
   closeFd synthFile
 

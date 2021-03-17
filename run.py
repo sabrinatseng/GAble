@@ -1,3 +1,4 @@
+import multiprocessing
 import subprocess
 import sys
 import re
@@ -5,6 +6,8 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from scipy.stats import shapiro, mannwhitneyu
 from ast import literal_eval
+from multiprocessing.pool import ThreadPool
+import statistics
 
 FNAME = "data.txt"
 
@@ -185,10 +188,136 @@ def plot_gens():
     plt.legend()
     plt.show()
 
+# takes in args for the executable
+def run_gp(args, search_space_size, random):
+    proc = subprocess.run(args, capture_output=True, encoding='UTF-8')
+    print("stdout = " + proc.stdout)
+    summary_idx = proc.stdout.find("SUMMARY")
+    assert(summary_idx >= 0)
+    vals_idx = proc.stdout[:summary_idx].rfind("[")
+    this_vals = literal_eval(proc.stdout[vals_idx:summary_idx])
+    output = re.split("[\n ]", proc.stdout[summary_idx:])
+    count = int(output[2])
+    failed = int(output[4])
+    mean = float(output[6])
+    median = float(output[8])
+    min_ = int(float(output[10]))
+    max_ = int(float(output[12]))
+    stddev = float(output[14])
+    iqr = int(float(output[16]))
+
+    print(mean)
+    print(stddev)
+    print(this_vals)
+
+    return (search_space_size, random, this_vals, mean, stddev)
+
+def compare_random_parallel(argv):
+    pool = ThreadPool(multiprocessing.cpu_count())
+    results = []
+
+    pop_size = 10
+    generations = 3
+    problem = "FilterEvens"
+    eval_ = "BestFitness"
+    fitness_function = argv[1]
+    num_trials = 30
+    processes = 3   # processes per run
+    # data to plot
+    search_space_sizes = []
+    avgs = {fitness_function: [], "RandomSearch": []}
+    errs = {fitness_function: [], "RandomSearch": []}
+    vals = {fitness_function: [], "RandomSearch": []}
+    for chromosome_size in (5,):
+        for chromosome_range in (3,):
+            for random in (False, True):
+                print(f"Starting {fitness_function} with chromosome size {chromosome_size}, range {chromosome_range}, random {random}")
+                if not random:
+                    size = (chromosome_range + 1) ** chromosome_size
+                    with open(FNAME, 'a+') as f:
+                        f.write('\n' + str(size) + '\t')
+                    # only add this once
+                    # chromosome range is inclusive
+                    # chromosome_size elements, each has (chromosome_range + 1) possibilities
+                    search_space_sizes.append(size)
+                args = [
+                    "./Gable",
+                    "--pop_size",
+                    str(pop_size),
+                    "--generations",
+                    str(generations),
+                    "--chromosome_size",
+                    str(chromosome_size),
+                    "--chromosome_range",
+                    str(chromosome_range),
+                    "--problem",
+                    problem,
+                    "--eval",
+                    eval_,
+                    "--fitness_function",
+                    fitness_function,
+                    "--num_trials",
+                    str(num_trials // processes),
+                    ]
+                if random:
+                    args.append("-r")
+
+                # run in thread pool
+                for i in range(processes):
+                    args.extend(["--fname", f"synth_{chromosome_size}_{chromosome_range}_{random}_{i}.hs"])
+                    results.append(pool.apply_async(run_gp, (args, size, random)))
+
+    # wait for all to finish
+    pool.close()
+    pool.join()
+    avgs["RandomSearch"] = [0.0] * len(search_space_sizes)
+    errs["RandomSearch"] = [0.0] * len(search_space_sizes)
+    vals["RandomSearch"] = [[] for _ in range(len(search_space_sizes))]
+    avgs[fitness_function] = [0.0] * len(search_space_sizes)
+    errs[fitness_function] = [0.0] * len(search_space_sizes)
+    vals[fitness_function] = [[] for _ in range(len(search_space_sizes))]
+
+    for result in results:
+        (size, random, this_vals, mean, stddev) = result.get()
+        idx = search_space_sizes.index(size)
+        if random:
+            # avgs["RandomSearch"][idx] += mean / processes
+            # overall variance = (variance_1 + variance_2) / 2
+            # so we keep track of sum of variances, and divide at the end
+            # errs["RandomSearch"][idx] += stddev**2
+            vals["RandomSearch"][idx].extend(this_vals)
+        else:
+            # avgs[fitness_function][idx] += mean / processes
+            # errs[fitness_function][idx] += stddev**2
+            vals[fitness_function][idx].extend(this_vals)
+
+        print(f"{size}: {this_vals}")
+    
+    # divide & sqrt variance to get stddev
+    # calculate avgs and stddevs
+    for i in range(len(search_space_sizes)):
+        avgs["RandomSearch"][i] = statistics.mean(vals["RandomSearch"][i])
+        avgs[fitness_function][i] = statistics.mean(vals[fitness_function][i])
+        errs["RandomSearch"][i] = statistics.stdev(vals["RandomSearch"][i])
+        errs[fitness_function][i] = statistics.stdev(vals[fitness_function][i])
+
+    for i in range(len(vals[fitness_function])):
+        U, p = mannwhitneyu(vals[fitness_function][i], vals["RandomSearch"][i])
+        print(f"Mann Whitney U test: p = {p} for search space size {search_space_sizes[i]}")
+
+    plt.errorbar(search_space_sizes, avgs[fitness_function], yerr=errs[fitness_function], label=fitness_function, capsize=5)
+    plt.errorbar(search_space_sizes, avgs["RandomSearch"], yerr=errs["RandomSearch"], label="random search", capsize=5)
+    plt.xlabel("Search Space Size")
+    plt.ylabel("Best Fitness Found")
+    plt.title(f"Best fitness after {generations} generations (pop size = {pop_size})")
+    plt.legend()
+    plt.show()
+
+
 def compare_random(argv):
     pop_size = 10
     generations = 8
-    problem = "MultiFilter2"
+    problem = "FilterEvens"
     eval_ = "BestFitness"
     fitness_function = argv[1]
     # data to plot
@@ -196,8 +325,8 @@ def compare_random(argv):
     avgs = {fitness_function: [], "RandomSearch": []}
     errs = {fitness_function: [], "RandomSearch": []}
     vals = {fitness_function: [], "RandomSearch": []}
-    for chromosome_size in (5,):
-        for chromosome_range in (9,):
+    for chromosome_size in (3,4):
+        for chromosome_range in (3,):
             for random in (False, True):
                 print(f"Running {fitness_function} with chromosome size {chromosome_size} and range {chromosome_range}")
                 if not random:
@@ -374,6 +503,7 @@ if __name__ == "__main__":
     # plot_time()
     # normality_test(args)
     # statistical_significance(args)
-    compare_random(args)
+    # compare_random(args)
+    compare_random_parallel(args)
     # fitness_hist(args)
     # fitness_scatter(args)
