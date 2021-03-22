@@ -192,6 +192,7 @@ def plot_gens():
 def run_gp(args, search_space_size, random):
     proc = subprocess.run(args, capture_output=True, encoding='UTF-8')
     print("stdout = " + proc.stdout)
+    print("stderr = " + proc.stderr)
     summary_idx = proc.stdout.find("SUMMARY")
     assert(summary_idx >= 0)
     vals_idx = proc.stdout[:summary_idx].rfind("[")
@@ -213,23 +214,24 @@ def run_gp(args, search_space_size, random):
     return (search_space_size, random, this_vals, mean, stddev)
 
 def compare_random_parallel(argv):
+    assert len(argv) >= 2
     pool = ThreadPool(multiprocessing.cpu_count())
     results = []
 
-    pop_size = 10
-    generations = 3
-    problem = "FilterEvens"
+    pop_size = 30
+    generations = 30
+    problem = "MultiFilter2"
     eval_ = "BestFitness"
-    fitness_function = argv[1]
-    num_trials = 30
-    processes = 3   # processes per run
+    fitness_function = "RefinementTypesNew"
+    num_trials = 60
+    processes = 5   # processes per run
     # data to plot
     search_space_sizes = []
     avgs = {fitness_function: [], "RandomSearch": []}
     errs = {fitness_function: [], "RandomSearch": []}
     vals = {fitness_function: [], "RandomSearch": []}
     for chromosome_size in (5,):
-        for chromosome_range in (3,):
+        for chromosome_range in (8,9,):
             for random in (False, True):
                 print(f"Starting {fitness_function} with chromosome size {chromosome_size}, range {chromosome_range}, random {random}")
                 if not random:
@@ -266,6 +268,7 @@ def compare_random_parallel(argv):
                 for i in range(processes):
                     args.extend(["--fname", f"synth_{chromosome_size}_{chromosome_range}_{random}_{i}.hs"])
                     results.append(pool.apply_async(run_gp, (args, size, random)))
+                    args = args[:-2]
 
     # wait for all to finish
     pool.close()
@@ -311,7 +314,7 @@ def compare_random_parallel(argv):
     plt.ylabel("Best Fitness Found")
     plt.title(f"Best fitness after {generations} generations (pop size = {pop_size})")
     plt.legend()
-    plt.show()
+    plt.savefig(argv[1])
 
 
 def compare_random(argv):
