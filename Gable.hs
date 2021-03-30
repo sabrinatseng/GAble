@@ -223,7 +223,8 @@ multiFilter3Pieces = cycle [isOddPieceX 1, isEvenPieceX 1, isGTTwoPieceX 1, isOd
 {- input/output examples for calculating fitness -}
 type Input = [Int]
 
-type Output = [Int]
+-- type Output = [Int]
+type Output = ([Int], [Int])
 
 filterEvensTests =
   [ ([0, 1, 2, 3, 4], [0, 2, 4]),
@@ -238,6 +239,15 @@ boundTests =
     ([], [])
   ]
 
+multiFilter2Tests =
+  [
+    ([], ([], [])),
+    ([0, 1, 2, 3, 4], ([0, 2, 4], [1, 3])),
+    ([4, 3, 2, 1, 0], ([4, 2, 0], [3, 1])),
+    ([-3, 0, 2, -1, 1], ([0, 2], [-3, -1, 1])),
+    ([3, 2, 4, 1, 9], ([2, 4], [3, 1, 9]))
+  ]
+
 {- Program pieces and io examples, based on value of the "problem" flag -}
 pieces = case flags_problem of
   FilterEvens -> filterEvensPieces
@@ -246,17 +256,17 @@ pieces = case flags_problem of
   MultiFilter3 -> multiFilter3Pieces
 
 (test_inputs, expected_outputs) = case flags_problem of
-  FilterEvens -> unzip filterEvensTests
-  Bound -> unzip boundTests
+  -- FilterEvens -> unzip filterEvensTests
+  -- Bound -> unzip boundTests
   -- TODO multi filter tests have to be handled differently
-  MultiFilter2 -> ([], [])
-  MultiFilter3 -> ([], [])
+  MultiFilter2 -> unzip multiFilter2Tests
+  -- MultiFilter3 -> ([], [])
 
 fnName = case flags_problem of
   FilterEvens -> "filterEvens"
   Bound -> "bound"
-  MultiFilter2 -> "multi_filter"
-  MultiFilter3 -> "multi_filter"
+  MultiFilter2 -> "multiFilter"
+  MultiFilter3 -> "multiFilter"
 
 {- options for writing to file -}
 openFileFlags = OpenFileFlags {append = False, exclusive = False, noctty = False, nonBlock = False, trunc = True}
@@ -469,7 +479,7 @@ evalIOExamples g = unsafePerformIO $ do
     setImports ["Prelude"]
     modules <- getLoadedModules
     setTopLevelModules modules
-    interpret fnName (as :: ([Int] -> [Int]))
+    interpret fnName (as :: (Input -> Output))
   case r of
     Left err -> return 0
     Right f -> return $ fromIntegral (checkIOExamples (map f test_inputs) expected_outputs) / fromIntegral (length expected_outputs)
@@ -629,7 +639,7 @@ fitnessAll (x : xs) = do
 main = do
   _ <- $initHFlags ""
   gen <- getStdGen
-  -- print $ evalState (calculateFitness [1, 1, 1, 1, 1]) fitnessMemo
+  -- print $ evalState (calculateFitness [1, 3, 6, 7, 8]) fitnessMemo
   if flags_fitness_all
     then fitnessAll $ replicateM flags_chromosome_size [0..flags_chromosome_range]
     else do
