@@ -195,17 +195,21 @@ def plot_gens_parallel(argv):
 
     pop_size = 20
     generations = 20
-    problem = "MultiFilter2"
-    eval_ = "BestFitness"
-    num_trials = 60
+    # pop_size = 5
+    # generations = 5
+    # problem = "MultiFilter2"
+    problem = "InsertionSort2"
+    eval_ = "GensToOptimal"
+    num_trials = 30
     processes = 5   # processes per run
     # data to plot
     search_space_sizes = []
     avgs = {"RefinementTypesNew": [], "IOExamples": [], "RandomSearch": []}
     errs = {"RefinementTypesNew": [], "IOExamples": [], "RandomSearch": []}
     vals = {"RefinementTypesNew": [], "IOExamples": [], "RandomSearch": []}
-    for chromosome_size in (5,):
-        for chromosome_range in (8,9,):
+    # for (chromosome_size, chromosome_range) in ((5,8), (5,9), (6,9), (7,9)):
+    # for (chromosome_size, chromosome_range) in ((3,4), (3,5), (4,5)):
+    for (chromosome_size, chromosome_range) in ((5,9), (5, 10), (6,10)):
             for fitness_function in ("RefinementTypesNew", "IOExamples", "RandomSearch"):
                 print(f"Starting {fitness_function} with chromosome size {chromosome_size}, range {chromosome_range}")
                 if fitness_function == "RefinementTypesNew":
@@ -257,20 +261,29 @@ def plot_gens_parallel(argv):
         idx = search_space_sizes.index(size)
         vals[fitness_function][idx].extend(this_vals)
 
-        print(f"{size}: {this_vals}")
+        # print(f"{size}: {this_vals}")
     
     # calculate avgs and stddevs
     for i in range(len(search_space_sizes)):
         for fitness_function in ("RefinementTypesNew", "IOExamples", "RandomSearch"):
+            print(f"{fitness_function} {search_space_sizes[i]}: {vals[fitness_function][i]}")
             avgs[fitness_function][i] = statistics.mean(vals[fitness_function][i])
             errs[fitness_function][i] = statistics.stdev(vals[fitness_function][i])
+
+    for i in range(len(search_space_sizes)):
+        U, p = mannwhitneyu(vals["RefinementTypesNew"][i], vals["IOExamples"][i])
+        print(f"Mann Whitney U test: p = {p} for search space size {search_space_sizes[i]}")
 
     # plot
     for fitness_function in ("RefinementTypesNew", "IOExamples", "RandomSearch"):
         plt.errorbar(search_space_sizes, avgs[fitness_function], yerr=errs[fitness_function], label=fitness_function, capsize=5)
     plt.xlabel("Search Space Size")
-    plt.ylabel("Best Fitness Found")
-    plt.title(f"Best fitness after {generations} generations (pop size = {pop_size})")
+    if eval_ == "BestFitness":
+        plt.ylabel("Best Fitness Found")
+        plt.title(f"Best fitness after {generations} generations (pop size = {pop_size}, {num_trials} trials)")
+    else:
+        plt.ylabel("Generations")
+        plt.title(f"Generations to find optimal solution (pop size = {pop_size}, {num_trials} trials)")
     plt.legend()
     plt.savefig(argv[1])
 
@@ -506,7 +519,7 @@ def fitness_hist(argv):
     plt.xlabel("Fitness")
     plt.ylabel("Number of individuals")
     plt.title("Fitness values")
-    plt.show()
+    plt.savefig(argv[2])
 
 def fitness_scatter(argv):
     pop_size = 10

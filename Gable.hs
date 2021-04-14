@@ -40,7 +40,7 @@ defineFlag "chromosome_range" (3 :: Int) "Range of values that the chromosome ca
 defineFlag "num_trials" (30 :: Int) "Number of trials of GE to run"
 data FitnessFunction = RefinementTypes | RefinementTypesNew | IOExamples deriving (Show, Read)
 defineEQFlag "fitness_function" [| RefinementTypesNew :: FitnessFunction |] "FITNESS_FUNCTION" "Fitness function for the GE"
-data Problem = FilterEvens | Bound | MultiFilter2 | MultiFilter3  deriving (Show, Read)
+data Problem = FilterEvens | Bound | MultiFilter2 | MultiFilter3 | InsertionSort | InsertionSort2 | QuickSort deriving (Show, Read)
 defineEQFlag "problem" [| FilterEvens :: Problem |] "PROBLEM" "Synthesis problem"
 data Eval = GensToOptimal | BestFitness deriving (Show, Read)
 defineEQFlag "eval" [| BestFitness :: Eval |] "EVAL" "Method for eval"
@@ -220,11 +220,142 @@ multiFilter3Piece = ProgramPiece "multiFilter3" multiFilter3Impl multiFilter3Ref
 multiFilter2Pieces = cycle [isOddPieceX 1, isEvenPieceX 1, isGTTwoPieceX 1, isOddPieceX 2, isEvenPieceX 2, isGTTwoPieceX 2, filter1Piece, filter2Piece, multiFilter2Piece, nullPiece]
 multiFilter3Pieces = cycle [isOddPieceX 1, isEvenPieceX 1, isGTTwoPieceX 1, isOddPieceX 2, isEvenPieceX 2, isGTTwoPieceX 2, isOddPieceX 3, isEvenPieceX 3, isGTTwoPieceX 3, multiFilter3Piece, nullPiece]
 
+-- pieces for insertion sort
+lteConditionImplX x = "condition" ++ show x ++ " x y = x <= y"
+lteConditionRefinementX x = "{-@ condition" ++ show x ++ " :: Ord a => x:a -> y:a -> {v:Bool | (v <=> x <= y)} @-}"
+lteConditionPieceX x = ProgramPiece ("lte" ++ show x) (lteConditionImplX x) (lteConditionRefinementX x)
+
+gteConditionImplX x = "condition" ++ show x ++ " x y = x >= y"
+gteConditionRefinementX x = "{-@ condition" ++ show x ++ " :: Ord a => x:a -> y:a -> {v:Bool | (v <=> x >= y)} @-}"
+gteConditionPieceX x = ProgramPiece ("gte" ++ show x) (gteConditionImplX x) (gteConditionRefinementX x)
+
+eqConditionImplX x = "condition" ++ show x ++ " x y = x == y"
+eqConditionRefinementX x = "{-@ condition" ++ show x ++ " :: Ord a => x:a -> y:a -> {v:Bool | (v <=> x == y)} @-}"
+eqConditionPieceX x = ProgramPiece ("eq" ++ show x) (eqConditionImplX x) (eqConditionRefinementX x)
+
+insertSortAscImpl = unlines [
+  "insertSortAsc [] = []",
+  "insertSortAsc (x:xs) = insertAsc x (insertSortAsc xs)"
+  ]
+insertSortAscRefinement = unlines [
+  "{-@ type IncrList a = [a]<{\\xi xj -> xi <= xj}> @-}",
+  "{-@ insertSortAsc :: (Ord a) => xs:[a] -> (IncrList a) @-}"
+  ]
+insertSortAscPiece = ProgramPiece "insertSortAsc" insertSortAscImpl insertSortAscRefinement
+
+insertAscImpl = unlines [
+  "insertAsc y []     = [y]",
+  "insertAsc y (x:xs)",
+  " | (condition1 y x)      = y : x : xs",
+  " | otherwise   = x : insertAsc y xs"
+  ]
+insertAscRefinement = "{-@ insertAsc :: (Ord a) => a -> IncrList a -> IncrList a @-}"
+insertAscPiece = ProgramPiece "insertAsc" insertAscImpl insertAscRefinement
+
+insertSortDecImpl = unlines [
+  "insertSortDec [] = []",
+  "insertSortDec (x:xs) = insertDec x (insertSortDec xs)"
+  ]
+insertSortDecRefinement = unlines [
+  "{-@ type DecrList a = [a]<{\\xi xj -> xi >= xj}> @-}",
+  "{-@ insertSortDec :: (Ord a) => xs:[a] -> (DecrList a) @-}"
+  ]
+insertSortDecPiece = ProgramPiece "insertSortDec" insertSortDecImpl insertSortDecRefinement
+
+insertDecImpl = unlines [
+  "insertDec y []     = [y]",
+  "insertDec y (x:xs)",
+  " | (condition2 y x)      = y : x : xs",
+  " | otherwise   = x : insertDec y xs"
+  ]
+insertDecRefinement = "{-@ insertDec :: (Ord a) => a -> DecrList a -> DecrList a @-}"
+insertDecPiece = ProgramPiece "insertDec" insertDecImpl insertDecRefinement
+
+sortAscDecImpl = "sortAscDec xs = (insertSortAsc xs, insertSortDec xs)"
+sortAscDecRefinement = "{-@ sortAscDec    :: (Ord a) => xs:[a] -> (IncrList a, DecrList a) @-}"
+sortAscDecPiece = ProgramPiece "sortAscDec" sortAscDecImpl sortAscDecRefinement
+
+insertionSortPieces = cycle [lteConditionPieceX 1, gteConditionPieceX 1, eqConditionPieceX 1, lteConditionPieceX 2, gteConditionPieceX 2, eqConditionPieceX 2, insertSortAscPiece, insertAscPiece, insertSortDecPiece, insertDecPiece, sortAscDecPiece, nullPiece]
+
+andImpl = "boolOp x y = x && y"
+andRefinement = "{-@ boolOp :: x:Bool -> y:Bool -> {v:Bool | (v <=> x && y)} @-}"
+andPiece = ProgramPiece "and" andImpl andRefinement
+
+orImpl = "boolOp x y = x || y"
+orRefinement = "{-@ boolOp :: x:Bool -> y:Bool -> {v:Bool | (v <=> x || y)} @-}"
+orPiece = ProgramPiece "or" orImpl orRefinement
+
+insert2Impl = unlines [
+  "insert y []     = [y]",
+  "insert y (x:xs)",
+  " | (boolOp (condition1 y x) (condition2 y x))      = y : x : xs",
+  " | otherwise   = x : insert y xs"
+  ]
+insert2Refinement = "{-@ insert :: (Ord a) => a -> IncrList a -> IncrList a @-}"
+insert2Piece = ProgramPiece "insert" insert2Impl insert2Refinement
+
+insertSort2Impl = unlines [
+  "insertSort [] = []",
+  "insertSort (x:xs) = insert x (insertSort xs)"
+  ]
+insertSort2Refinement = unlines [
+  "{-@ type IncrList a = [a]<{\\xi xj -> xi <= xj}> @-}",
+  "{-@ insertSort :: (Ord a) => xs:[a] -> (IncrList a) @-}"
+  ]
+insertSort2Piece = ProgramPiece "insertSort" insertSort2Impl insertSort2Refinement
+
+insertionSort2Pieces = cycle [lteConditionPieceX 1, gteConditionPieceX 1, eqConditionPieceX 1, lteConditionPieceX 2, gteConditionPieceX 2, eqConditionPieceX 2, andPiece, orPiece, insert2Piece, insertSort2Piece, nullPiece]
+
+-- pieces for quicksort
+ltConditionImplX x = "condition" ++ show x ++ " x y = x < y"
+ltConditionRefinementX x = "{-@ condition" ++ show x ++ " :: Ord a => x:a -> y:a -> {v:Bool | (v <=> x < y)} @-}"
+ltConditionPieceX x = ProgramPiece ("lt" ++ show x) (ltConditionImplX x) (ltConditionRefinementX x)
+
+filterLtImpl = "filterLt x xs = [y | y <- xs, condition1 y x]"
+filterLtRefinement = "{-@ filterLt :: (Ord a) => x:a -> y:[a] -> {vv: [{v:a | v < x}] | len vv <= len y} @-}"
+filterLtPiece = ProgramPiece "filterLt" filterLtImpl filterLtRefinement
+
+filterGteImpl = "filterGte x xs = [y | y <- xs, condition2 y x]"
+filterGteRefinement = "{-@ filterGte :: (Ord a) => x:a -> y:[a] -> {vv: [{v:a | v >= x}] | len vv <= len y} @-}"
+filterGtePiece = ProgramPiece "filterGte" filterGteImpl filterGteRefinement
+
+pivImpl = unlines
+  [
+    "pivApp piv []     ys  = piv : ys",
+    "pivApp piv (x:xs) ys  = x   : pivApp piv xs ys"
+  ]
+pivRefinement = unlines
+  [
+    "{-@ pivApp :: piv:a",
+    "            -> IncrList {v:a | v <  piv}",
+    "            -> IncrList {v:a | v >= piv}",
+    "            -> IncrList a",
+    "@-}"
+  ]
+pivPiece = ProgramPiece "piv" pivImpl pivRefinement
+
+quickSortImpl = unlines
+  [
+    "quickSort []     = []",
+    "quickSort (x:xs) = pivApp x lts gts",
+    "   where",
+    "    lts          = quickSort (filterLt x xs)",
+    "    gts          = quickSort (filterGte x xs)"
+  ]
+quickSortRefinement = unlines
+  [
+    "{-@ type IncrList a = [a]<{\\xi xj -> xi <= xj}> @-}",
+    "{-@ quickSort    :: (Ord a) => [a] -> IncrList a @-}"
+  ]
+quickSortPiece = ProgramPiece "quickSort" quickSortImpl quickSortRefinement
+
+quickSortPieces = cycle [ltConditionPieceX 1, gteConditionPieceX 1, ltConditionPieceX 2, gteConditionPieceX 2, filterLtPiece, filterGtePiece, pivPiece, quickSortPiece, nullPiece]
+
 {- input/output examples for calculating fitness -}
 type Input = [Int]
 
--- type Output = [Int]
-type Output = ([Int], [Int])
+type Output = [Int]
+-- type Output = ([Int], [Int])
 
 filterEvensTests =
   [ ([0, 1, 2, 3, 4], [0, 2, 4]),
@@ -248,25 +379,62 @@ multiFilter2Tests =
     ([3, 2, 4, 1, 9], ([2, 4], [3, 1, 9]))
   ]
 
+insertionSortTests =
+  [
+    ([], ([], [])),
+    ([1], ([1], [1])),
+    ([0, 2, 1], ([0, 1, 2], [2, 1, 0])),
+    ([3, 2, 1], ([1, 2, 3], [3, 2, 1])),
+    ([4, 1, 9, -1], ([-1, 1, 4, 9], [9, 4, 1, -1]))
+  ]
+
+insertionSort2Tests =
+  [
+    ([], []),
+    ([1], [1]),
+    ([0, 2, 1], [0, 1, 2]),
+    ([3, 2, 1], [1, 2, 3]),
+    ([4, 1, 9, -1], [-1, 1, 4, 9])
+  ]
+
+quickSortTests = 
+  [
+    ([], []),
+    ([1], [1]),
+    ([0, 2, 1], [0, 1, 2]),
+    ([3, 2, 1], [1, 2, 3]),
+    ([4, 1, 9, -1], [-1, 1, 4, 9])
+  ]
+
+
 {- Program pieces and io examples, based on value of the "problem" flag -}
 pieces = case flags_problem of
   FilterEvens -> filterEvensPieces
   Bound -> boundPieces
   MultiFilter2 -> multiFilter2Pieces
   MultiFilter3 -> multiFilter3Pieces
+  InsertionSort -> insertionSortPieces
+  InsertionSort2 -> insertionSort2Pieces
+  QuickSort -> quickSortPieces
 
 (test_inputs, expected_outputs) = case flags_problem of
   -- FilterEvens -> unzip filterEvensTests
   -- Bound -> unzip boundTests
   -- TODO multi filter tests have to be handled differently
-  MultiFilter2 -> unzip multiFilter2Tests
+  -- MultiFilter2 -> unzip multiFilter2Tests
   -- MultiFilter3 -> ([], [])
+  -- InsertionSort -> unzip insertionSortTests
+  InsertionSort2 -> unzip insertionSort2Tests
+  QuickSort -> unzip quickSortTests
 
 fnName = case flags_problem of
   FilterEvens -> "filterEvens"
   Bound -> "bound"
   MultiFilter2 -> "multiFilter"
   MultiFilter3 -> "multiFilter"
+  InsertionSort -> "sortAscDec"
+  InsertionSort2 -> "insertSort"
+  QuickSort -> "quickSort"
 
 {- options for writing to file -}
 openFileFlags = OpenFileFlags {append = False, exclusive = False, noctty = False, nonBlock = False, trunc = True}
@@ -423,11 +591,41 @@ multiFilter3Main =
       "         putStrLn $ \"gt2: \" ++ show gt2"
     ]
 
+insertionSortMain = 
+  unlines
+    [
+      "test = [3, 1, 4, 6, 7, 2]",
+      "main = do",
+      "         putStrLn $ \"original: \" ++ show test",
+      "         putStrLn $ \"sorted: \" ++ show (sortAscDec test)"
+    ]
+
+insertionSort2Main = 
+  unlines
+    [
+      "test = [3, 1, 4, 6, 7, 2]",
+      "main = do",
+      "         putStrLn $ \"original: \" ++ show test",
+      "         putStrLn $ \"sorted: \" ++ show (insertSort test)"
+    ]
+
+quickSortMain = 
+  unlines
+    [
+      "test = [3, 1, 4, 6, 7, 2]",
+      "main = do",
+      "         putStrLn $ \"original: \" ++ show test",
+      "         putStrLn $ \"sorted: \" ++ show (quickSort test)"
+    ]
+
 mainPiece = case flags_problem of
   FilterEvens -> filterEvensMain
   Bound -> boundMain
   MultiFilter2 -> multiFilter2Main
   MultiFilter3 -> multiFilter3Main
+  InsertionSort -> insertionSortMain
+  InsertionSort2 -> insertionSort2Main
+  QuickSort -> quickSortMain
 
 {- Use refinement type checking to calculate fitness. -}
 {-# NOINLINE refinementTypeCheck #-}
@@ -462,7 +660,7 @@ refinementTypeCheckNew g = unsafePerformIO $ do
 getRefinementErrInfo :: String -> RefinementErrInfo
 getRefinementErrInfo s
   | not (null (indices (pack "LIQUID: UNSAFE") text)) = Unsafe count
-  | not (null (indices (pack "LIQUID: ERROR Invalid Source") text)) = Invalid count
+  | not (null (indices (pack "LIQUID: ERROR") text)) = Invalid count
   | otherwise = error ("unexpected error output from liquid: " ++ s)
   where
     text = pack s
@@ -639,7 +837,7 @@ fitnessAll (x : xs) = do
 main = do
   _ <- $initHFlags ""
   gen <- getStdGen
-  -- print $ evalState (calculateFitness [1, 3, 6, 7, 8]) fitnessMemo
+  print $ evalState (calculateFitness [0, 3, 4, 5, 6, 7]) fitnessMemo
   if flags_fitness_all
     then fitnessAll $ replicateM flags_chromosome_size [0..flags_chromosome_range]
     else do
