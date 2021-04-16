@@ -198,9 +198,9 @@ def plot_gens_parallel(argv):
     # pop_size = 5
     # generations = 5
     # problem = "MultiFilter2"
-    problem = "InsertionSort2"
+    problem = "QuickSort"
     eval_ = "GensToOptimal"
-    num_trials = 30
+    num_trials = 60
     processes = 5   # processes per run
     # data to plot
     search_space_sizes = []
@@ -209,7 +209,7 @@ def plot_gens_parallel(argv):
     vals = {"RefinementTypesNew": [], "IOExamples": [], "RandomSearch": []}
     # for (chromosome_size, chromosome_range) in ((5,8), (5,9), (6,9), (7,9)):
     # for (chromosome_size, chromosome_range) in ((3,4), (3,5), (4,5)):
-    for (chromosome_size, chromosome_range) in ((5,9), (5, 10), (6,10)):
+    for (chromosome_size, chromosome_range) in ((6,7), (6, 8), (7,8)):
             for fitness_function in ("RefinementTypesNew", "IOExamples", "RandomSearch"):
                 print(f"Starting {fitness_function} with chromosome size {chromosome_size}, range {chromosome_range}")
                 if fitness_function == "RefinementTypesNew":

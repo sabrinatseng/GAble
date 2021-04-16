@@ -47,6 +47,7 @@ defineEQFlag "eval" [| BestFitness :: Eval |] "EVAL" "Method for eval"
 defineFlag "fname" ("synth.hs" :: String) "Filename to use for synthesis / liquid checking"
 defineFlag "r:random_search" False "Use random search instead of GE"
 defineFlag "f:fitness_all" False "Calculate all fitness values in the space"
+defineFlag "d:disallow_dups" False "Disallow duplicates in the chromosome"
 $(return []) -- hack to fix known issue with last flag not being recognized
 
 {-properties-}
@@ -221,19 +222,32 @@ multiFilter2Pieces = cycle [isOddPieceX 1, isEvenPieceX 1, isGTTwoPieceX 1, isOd
 multiFilter3Pieces = cycle [isOddPieceX 1, isEvenPieceX 1, isGTTwoPieceX 1, isOddPieceX 2, isEvenPieceX 2, isGTTwoPieceX 2, isOddPieceX 3, isEvenPieceX 3, isGTTwoPieceX 3, multiFilter3Piece, nullPiece]
 
 -- pieces for insertion sort
-lteConditionImplX x = "condition" ++ show x ++ " x y = x <= y"
+lteConditionImplX x = unlines
+  [
+    "condition" ++ show x ++ ":: Int -> Int -> Bool",
+    "condition" ++ show x ++ " x y = x <= y"
+  ]
 lteConditionRefinementX x = "{-@ condition" ++ show x ++ " :: Ord a => x:a -> y:a -> {v:Bool | (v <=> x <= y)} @-}"
 lteConditionPieceX x = ProgramPiece ("lte" ++ show x) (lteConditionImplX x) (lteConditionRefinementX x)
 
-gteConditionImplX x = "condition" ++ show x ++ " x y = x >= y"
+gteConditionImplX x = unlines
+  [
+    "condition" ++ show x ++ ":: Int -> Int -> Bool",
+    "condition" ++ show x ++ " x y = x >= y"
+  ]
 gteConditionRefinementX x = "{-@ condition" ++ show x ++ " :: Ord a => x:a -> y:a -> {v:Bool | (v <=> x >= y)} @-}"
 gteConditionPieceX x = ProgramPiece ("gte" ++ show x) (gteConditionImplX x) (gteConditionRefinementX x)
 
-eqConditionImplX x = "condition" ++ show x ++ " x y = x == y"
+eqConditionImplX x = unlines
+  [
+    "condition" ++ show x ++ ":: Int -> Int -> Bool",
+    "condition" ++ show x ++ " x y = x == y"
+  ]
 eqConditionRefinementX x = "{-@ condition" ++ show x ++ " :: Ord a => x:a -> y:a -> {v:Bool | (v <=> x == y)} @-}"
 eqConditionPieceX x = ProgramPiece ("eq" ++ show x) (eqConditionImplX x) (eqConditionRefinementX x)
 
 insertSortAscImpl = unlines [
+  "insertSortAsc :: [Int] -> [Int]",
   "insertSortAsc [] = []",
   "insertSortAsc (x:xs) = insertAsc x (insertSortAsc xs)"
   ]
@@ -244,6 +258,7 @@ insertSortAscRefinement = unlines [
 insertSortAscPiece = ProgramPiece "insertSortAsc" insertSortAscImpl insertSortAscRefinement
 
 insertAscImpl = unlines [
+  "insertAsc :: Int -> [Int] -> [Int]",
   "insertAsc y []     = [y]",
   "insertAsc y (x:xs)",
   " | (condition1 y x)      = y : x : xs",
@@ -253,6 +268,7 @@ insertAscRefinement = "{-@ insertAsc :: (Ord a) => a -> IncrList a -> IncrList a
 insertAscPiece = ProgramPiece "insertAsc" insertAscImpl insertAscRefinement
 
 insertSortDecImpl = unlines [
+  "insertSortDec :: [Int] -> [Int]",
   "insertSortDec [] = []",
   "insertSortDec (x:xs) = insertDec x (insertSortDec xs)"
   ]
@@ -263,6 +279,7 @@ insertSortDecRefinement = unlines [
 insertSortDecPiece = ProgramPiece "insertSortDec" insertSortDecImpl insertSortDecRefinement
 
 insertDecImpl = unlines [
+  "insertDec :: Int -> [Int] -> [Int]",
   "insertDec y []     = [y]",
   "insertDec y (x:xs)",
   " | (condition2 y x)      = y : x : xs",
@@ -271,21 +288,34 @@ insertDecImpl = unlines [
 insertDecRefinement = "{-@ insertDec :: (Ord a) => a -> DecrList a -> DecrList a @-}"
 insertDecPiece = ProgramPiece "insertDec" insertDecImpl insertDecRefinement
 
-sortAscDecImpl = "sortAscDec xs = (insertSortAsc xs, insertSortDec xs)"
+sortAscDecImpl = unlines
+  [
+    "sortAscDec :: [Int] -> ([Int], [Int])",
+    "sortAscDec xs = (insertSortAsc xs, insertSortDec xs)"
+  ]
 sortAscDecRefinement = "{-@ sortAscDec    :: (Ord a) => xs:[a] -> (IncrList a, DecrList a) @-}"
 sortAscDecPiece = ProgramPiece "sortAscDec" sortAscDecImpl sortAscDecRefinement
 
 insertionSortPieces = cycle [lteConditionPieceX 1, gteConditionPieceX 1, eqConditionPieceX 1, lteConditionPieceX 2, gteConditionPieceX 2, eqConditionPieceX 2, insertSortAscPiece, insertAscPiece, insertSortDecPiece, insertDecPiece, sortAscDecPiece, nullPiece]
 
-andImpl = "boolOp x y = x && y"
+andImpl = unlines
+  [
+    "boolOp :: Bool -> Bool -> Bool",
+    "boolOp x y = x && y"
+  ]
 andRefinement = "{-@ boolOp :: x:Bool -> y:Bool -> {v:Bool | (v <=> x && y)} @-}"
 andPiece = ProgramPiece "and" andImpl andRefinement
 
-orImpl = "boolOp x y = x || y"
+orImpl = unlines
+  [
+    "boolOp :: Bool -> Bool -> Bool",
+    "boolOp x y = x || y"
+  ]
 orRefinement = "{-@ boolOp :: x:Bool -> y:Bool -> {v:Bool | (v <=> x || y)} @-}"
 orPiece = ProgramPiece "or" orImpl orRefinement
 
 insert2Impl = unlines [
+  "insertAsc :: Int -> [Int] -> [Int]",
   "insert y []     = [y]",
   "insert y (x:xs)",
   " | (boolOp (condition1 y x) (condition2 y x))      = y : x : xs",
@@ -295,6 +325,7 @@ insert2Refinement = "{-@ insert :: (Ord a) => a -> IncrList a -> IncrList a @-}"
 insert2Piece = ProgramPiece "insert" insert2Impl insert2Refinement
 
 insertSort2Impl = unlines [
+  "insertSortAsc :: [Int] -> [Int]",
   "insertSort [] = []",
   "insertSort (x:xs) = insert x (insertSort xs)"
   ]
@@ -307,20 +338,33 @@ insertSort2Piece = ProgramPiece "insertSort" insertSort2Impl insertSort2Refineme
 insertionSort2Pieces = cycle [lteConditionPieceX 1, gteConditionPieceX 1, eqConditionPieceX 1, lteConditionPieceX 2, gteConditionPieceX 2, eqConditionPieceX 2, andPiece, orPiece, insert2Piece, insertSort2Piece, nullPiece]
 
 -- pieces for quicksort
-ltConditionImplX x = "condition" ++ show x ++ " x y = x < y"
+ltConditionImplX x = unlines 
+  [
+    "condition" ++ show x ++ ":: Int -> Int -> Bool",
+    "condition" ++ show x ++ " x y = x < y"
+  ]
 ltConditionRefinementX x = "{-@ condition" ++ show x ++ " :: Ord a => x:a -> y:a -> {v:Bool | (v <=> x < y)} @-}"
 ltConditionPieceX x = ProgramPiece ("lt" ++ show x) (ltConditionImplX x) (ltConditionRefinementX x)
 
-filterLtImpl = "filterLt x xs = [y | y <- xs, condition1 y x]"
+filterLtImpl = unlines
+  [
+    "filterLt :: Int -> [Int] -> [Int]",
+    "filterLt x xs = [y | y <- xs, condition1 y x]"
+  ]
 filterLtRefinement = "{-@ filterLt :: (Ord a) => x:a -> y:[a] -> {vv: [{v:a | v < x}] | len vv <= len y} @-}"
 filterLtPiece = ProgramPiece "filterLt" filterLtImpl filterLtRefinement
 
-filterGteImpl = "filterGte x xs = [y | y <- xs, condition2 y x]"
+filterGteImpl = unlines
+  [
+    "filterGte :: Int -> [Int] -> [Int]",
+    "filterGte x xs = [y | y <- xs, condition2 y x]"
+  ]
 filterGteRefinement = "{-@ filterGte :: (Ord a) => x:a -> y:[a] -> {vv: [{v:a | v >= x}] | len vv <= len y} @-}"
 filterGtePiece = ProgramPiece "filterGte" filterGteImpl filterGteRefinement
 
 pivImpl = unlines
   [
+    "pivApp :: Int -> [Int] -> [Int] -> [Int]",
     "pivApp piv []     ys  = piv : ys",
     "pivApp piv (x:xs) ys  = x   : pivApp piv xs ys"
   ]
@@ -336,6 +380,7 @@ pivPiece = ProgramPiece "piv" pivImpl pivRefinement
 
 quickSortImpl = unlines
   [
+    "quickSort :: [Int] -> [Int]",
     "quickSort []     = []",
     "quickSort (x:xs) = pivApp x lts gts",
     "   where",
@@ -726,7 +771,11 @@ createIndiv xs = GAIndividual xs defaultFitness
 {-creates an array of individuals with random genotypes-}
 createPop :: Int -> [Int] -> Population
 createPop 0 _ = []
-createPop popCnt rndInts = createIndiv (take flags_chromosome_size rndInts) : createPop (popCnt -1) (drop flags_chromosome_size rndInts)
+createPop popCnt rndInts = createIndiv (take flags_chromosome_size rnds) : createPop (popCnt -1) (drop flags_chromosome_size rnds)
+  where
+    rnds = case flags_disallow_dups of
+          True -> nub rndInts
+          False -> rndInts
 
 {- Evolve the population recursively counting with genotype and
 returning a population of the best individuals of each
