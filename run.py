@@ -2,6 +2,7 @@ import multiprocessing
 import subprocess
 import sys
 import re
+import math
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from scipy.stats import shapiro, mannwhitneyu
@@ -10,6 +11,7 @@ from multiprocessing.pool import ThreadPool
 import statistics
 
 FNAME = "data.txt"
+
 
 def statistical_significance(argv):
     # call with two different fitness functions
@@ -36,7 +38,7 @@ def statistical_significance(argv):
             eval_,
             "--fitness_function",
             fitness_function
-            ]
+        ]
         if random:
             args.append("-r")
 
@@ -57,6 +59,7 @@ def statistical_significance(argv):
     U, p = mannwhitneyu(vals[True], vals[False])
     print(f"p = {p}")
 
+
 def normality_test(argv):
     # call with fitness function as first arg
     pop_size = 10
@@ -74,7 +77,7 @@ def normality_test(argv):
         str(chromosome_size),
         "--chromosome_range",
         str(chromosome_range),
-        ]
+    ]
     if fitness_function == "RandomSearch":
         args.append("-r")
     else:
@@ -91,6 +94,7 @@ def normality_test(argv):
     stat, p = shapiro(vals)
     print(f"p = {p}")
 
+
 def read_floats(fname):
     data = []
     with open(fname, 'r') as f:
@@ -101,16 +105,18 @@ def read_floats(fname):
             print("Not a number: %s" % s)
     return data
 
+
 def plot_time():
     data = [
         read_floats("RefinementTypes_times.txt"),
         read_floats("IOExamples_times.txt")
-        ]
+    ]
     plt.boxplot(data)
     plt.xticks([1, 2], ["Refinement Types", "IO Examples"])
     plt.ylabel("Time per computation (secs)")
     plt.title("Fitness computation time for chromosome size = 3")
     plt.show()
+
 
 def plot_gens():
     pop_size = 10
@@ -118,12 +124,15 @@ def plot_gens():
     problem = "Bound"
     # data to plot
     search_space_size = []
-    avgs = {"RefinementTypes": [], "RefinementTypesNew": [], "IOExamples": [], "RandomSearch": []}
-    errs = {"RefinementTypes": [], "RefinementTypesNew": [], "IOExamples": [], "RandomSearch": []}
+    avgs = {"RefinementTypes": [], "RefinementTypesNew": [],
+            "IOExamples": [], "RandomSearch": []}
+    errs = {"RefinementTypes": [], "RefinementTypesNew": [],
+            "IOExamples": [], "RandomSearch": []}
     for chromosome_size in (2, 3, 4,):
         for chromosome_range in (2, 3, 4,):
             for fitness_function in ("RefinementTypes", "RefinementTypesNew", "IOExamples", "RandomSearch"):
-                print(f"Running {fitness_function} with chromosome size {chromosome_size} and range {chromosome_range}")
+                print(
+                    f"Running {fitness_function} with chromosome size {chromosome_size} and range {chromosome_range}")
                 if fitness_function == "RefinementTypes":
                     size = (chromosome_range + 1) ** chromosome_size
                     with open(FNAME, 'a+') as f:
@@ -144,12 +153,13 @@ def plot_gens():
                     str(chromosome_range),
                     "--problem",
                     problem,
-                    ]
+                ]
                 if fitness_function == "RandomSearch":
                     args.append("-r")
                 else:
                     args.extend(["--fitness_function", fitness_function])
-                proc = subprocess.run(args, capture_output=True, encoding="utf-8")
+                proc = subprocess.run(
+                    args, capture_output=True, encoding="utf-8")
                 summary_idx = proc.stdout.find("SUMMARY")
                 assert(summary_idx >= 0)
                 vals_idx = proc.stdout[:summary_idx].rfind("[")
@@ -178,15 +188,20 @@ def plot_gens():
                 # print(f"stddev = {stddev}")
                 # print(f"iqr = {iqr}")
 
-    plt.errorbar(search_space_size, avgs["RefinementTypes"], yerr=errs["RefinementTypes"], label="refinement types", capsize=5)
-    plt.errorbar(search_space_size, avgs["RefinementTypesNew"], yerr=errs["RefinementTypesNew"], label="refinement types new", capsize=5)
-    plt.errorbar(search_space_size, avgs["IOExamples"], yerr=errs["IOExamples"], label="i/o examples", capsize=5)
-    plt.errorbar(search_space_size, avgs["RandomSearch"], yerr=errs["RandomSearch"], label="random search", capsize=5)
+    plt.errorbar(search_space_size, avgs["RefinementTypes"],
+                 yerr=errs["RefinementTypes"], label="refinement types", capsize=5)
+    plt.errorbar(search_space_size, avgs["RefinementTypesNew"],
+                 yerr=errs["RefinementTypesNew"], label="refinement types new", capsize=5)
+    plt.errorbar(search_space_size, avgs["IOExamples"],
+                 yerr=errs["IOExamples"], label="i/o examples", capsize=5)
+    plt.errorbar(search_space_size, avgs["RandomSearch"],
+                 yerr=errs["RandomSearch"], label="random search", capsize=5)
     plt.xlabel("Search Space Size")
     plt.ylabel("Number of generations")
     plt.title("Generations to optimal solution (pop size = 10)")
     plt.legend()
     plt.show()
+
 
 def plot_gens_parallel(argv):
     assert len(argv) >= 2
@@ -195,8 +210,6 @@ def plot_gens_parallel(argv):
 
     pop_size = 20
     generations = 20
-    # pop_size = 5
-    # generations = 5
     # problem = "MultiFilter2"
     problem = "QuickSort"
     eval_ = "GensToOptimal"
@@ -209,44 +222,49 @@ def plot_gens_parallel(argv):
     vals = {"RefinementTypesNew": [], "IOExamples": [], "RandomSearch": []}
     # for (chromosome_size, chromosome_range) in ((5,8), (5,9), (6,9), (7,9)):
     # for (chromosome_size, chromosome_range) in ((3,4), (3,5), (4,5)):
-    for (chromosome_size, chromosome_range) in ((6,7), (6, 8), (7,8)):
-            for fitness_function in ("RefinementTypesNew", "IOExamples", "RandomSearch"):
-                print(f"Starting {fitness_function} with chromosome size {chromosome_size}, range {chromosome_range}")
-                if fitness_function == "RefinementTypesNew":
-                    size = (chromosome_range + 1) ** chromosome_size
-                    with open(FNAME, 'a+') as f:
-                        f.write('\n' + str(size) + '\t')
-                    # only add this once
-                    # chromosome range is inclusive
-                    # chromosome_size elements, each has (chromosome_range + 1) possibilities
-                    search_space_sizes.append(size)
-                args = [
-                    "./Gable",
-                    "--pop_size",
-                    str(pop_size),
-                    "--generations",
-                    str(generations),
-                    "--chromosome_size",
-                    str(chromosome_size),
-                    "--chromosome_range",
-                    str(chromosome_range),
-                    "--problem",
-                    problem,
-                    "--eval",
-                    eval_,
-                    "--num_trials",
-                    str(num_trials // processes),
-                    ]
-                if fitness_function == "RandomSearch":
-                    args.extend(["--fitness_function", "RefinementTypesNew", "-r"])
-                else:
-                    args.extend(["--fitness_function", fitness_function])
+    for (chromosome_size, chromosome_range) in ((6, 7), (6, 8), (6, 9)):
+        for fitness_function in ("RefinementTypesNew", "IOExamples", "RandomSearch"):
+            print(
+                f"Starting {fitness_function} with chromosome size {chromosome_size}, range {chromosome_range}")
+            if fitness_function == "RefinementTypesNew":
+                size = (chromosome_range + 1) ** chromosome_size
+                # size = math.factorial(chromosome_range + 1) / math.factorial(chromosome_range + 1 - chromosome_size)
+                with open(FNAME, 'a+') as f:
+                    f.write('\n' + str(size) + '\t')
+                # only add this once
+                # chromosome range is inclusive
+                # chromosome_size elements, each has (chromosome_range + 1) possibilities
+                search_space_sizes.append(size)
+            args = [
+                "./Gable",
+                "--pop_size",
+                str(pop_size),
+                "--generations",
+                str(generations),
+                "--chromosome_size",
+                str(chromosome_size),
+                "--chromosome_range",
+                str(chromosome_range),
+                "--problem",
+                problem,
+                "--eval",
+                eval_,
+                "--num_trials",
+                str(num_trials // processes),
+                # "-d"
+            ]
+            if fitness_function == "RandomSearch":
+                args.extend(["--fitness_function", "RefinementTypesNew", "-r"])
+            else:
+                args.extend(["--fitness_function", fitness_function])
 
-                # run in thread pool
-                for i in range(processes):
-                    args.extend(["--fname", f"synth_{chromosome_size}_{chromosome_range}_{fitness_function}_{i}.hs"])
-                    results.append(pool.apply_async(run_gp, (args, size, fitness_function, fitness_function == "RandomSearch")))
-                    args = args[:-2]
+            # run in thread pool
+            for i in range(processes):
+                args.extend(
+                    ["--fname", f"synth_{chromosome_size}_{chromosome_range}_{fitness_function}_{i}.hs"])
+                results.append(pool.apply_async(
+                    run_gp, (args, size, fitness_function, fitness_function == "RandomSearch")))
+                args = args[:-2]
 
     # wait for all to finish
     pool.close()
@@ -262,32 +280,42 @@ def plot_gens_parallel(argv):
         vals[fitness_function][idx].extend(this_vals)
 
         # print(f"{size}: {this_vals}")
-    
+
     # calculate avgs and stddevs
     for i in range(len(search_space_sizes)):
         for fitness_function in ("RefinementTypesNew", "IOExamples", "RandomSearch"):
-            print(f"{fitness_function} {search_space_sizes[i]}: {vals[fitness_function][i]}")
-            avgs[fitness_function][i] = statistics.mean(vals[fitness_function][i])
-            errs[fitness_function][i] = statistics.stdev(vals[fitness_function][i])
+            print(
+                f"{fitness_function} {search_space_sizes[i]}: {vals[fitness_function][i]}")
+            avgs[fitness_function][i] = statistics.mean(
+                vals[fitness_function][i])
+            errs[fitness_function][i] = statistics.stdev(
+                vals[fitness_function][i])
 
     for i in range(len(search_space_sizes)):
-        U, p = mannwhitneyu(vals["RefinementTypesNew"][i], vals["IOExamples"][i])
-        print(f"Mann Whitney U test: p = {p} for search space size {search_space_sizes[i]}")
+        U, p = mannwhitneyu(vals["RefinementTypesNew"]
+                            [i], vals["IOExamples"][i])
+        print(
+            f"Mann Whitney U test: p = {p} for search space size {search_space_sizes[i]}")
 
     # plot
     for fitness_function in ("RefinementTypesNew", "IOExamples", "RandomSearch"):
-        plt.errorbar(search_space_sizes, avgs[fitness_function], yerr=errs[fitness_function], label=fitness_function, capsize=5)
+        plt.errorbar(search_space_sizes, avgs[fitness_function],
+                     yerr=errs[fitness_function], label=fitness_function, capsize=5)
     plt.xlabel("Search Space Size")
     if eval_ == "BestFitness":
         plt.ylabel("Best Fitness Found")
-        plt.title(f"Best fitness after {generations} generations (pop size = {pop_size}, {num_trials} trials)")
+        plt.title(
+            f"Best fitness after {generations} generations (pop size = {pop_size}, {num_trials} trials)")
     else:
         plt.ylabel("Generations")
-        plt.title(f"Generations to find optimal solution (pop size = {pop_size}, {num_trials} trials)")
+        plt.title(
+            f"Generations to find optimal solution (pop size = {pop_size}, {num_trials} trials)")
     plt.legend()
     plt.savefig(argv[1])
 
 # takes in args for the executable
+
+
 def run_gp(args, search_space_size, fitness_function, random):
     proc = subprocess.run(args, capture_output=True, encoding='UTF-8')
     print("stdout = " + proc.stdout)
@@ -312,6 +340,7 @@ def run_gp(args, search_space_size, fitness_function, random):
 
     return (search_space_size, fitness_function, random, this_vals, mean, stddev)
 
+
 def compare_random_parallel(argv):
     assert len(argv) >= 2
     pool = ThreadPool(multiprocessing.cpu_count())
@@ -330,9 +359,10 @@ def compare_random_parallel(argv):
     errs = {fitness_function: [], "RandomSearch": []}
     vals = {fitness_function: [], "RandomSearch": []}
     for chromosome_size in (5,):
-        for chromosome_range in (8,9,):
+        for chromosome_range in (8, 9,):
             for random in (False, True):
-                print(f"Starting {fitness_function} with chromosome size {chromosome_size}, range {chromosome_range}, random {random}")
+                print(
+                    f"Starting {fitness_function} with chromosome size {chromosome_size}, range {chromosome_range}, random {random}")
                 if not random:
                     size = (chromosome_range + 1) ** chromosome_size
                     with open(FNAME, 'a+') as f:
@@ -359,14 +389,16 @@ def compare_random_parallel(argv):
                     fitness_function,
                     "--num_trials",
                     str(num_trials // processes),
-                    ]
+                ]
                 if random:
                     args.append("-r")
 
                 # run in thread pool
                 for i in range(processes):
-                    args.extend(["--fname", f"synth_{chromosome_size}_{chromosome_range}_{random}_{i}.hs"])
-                    results.append(pool.apply_async(run_gp, (args, size, fitness_function, random)))
+                    args.extend(
+                        ["--fname", f"synth_{chromosome_size}_{chromosome_range}_{random}_{i}.hs"])
+                    results.append(pool.apply_async(
+                        run_gp, (args, size, fitness_function, random)))
                     args = args[:-2]
 
     # wait for all to finish
@@ -394,7 +426,7 @@ def compare_random_parallel(argv):
             vals[fitness_function][idx].extend(this_vals)
 
         print(f"{size}: {this_vals}")
-    
+
     # divide & sqrt variance to get stddev
     # calculate avgs and stddevs
     for i in range(len(search_space_sizes)):
@@ -405,13 +437,17 @@ def compare_random_parallel(argv):
 
     for i in range(len(vals[fitness_function])):
         U, p = mannwhitneyu(vals[fitness_function][i], vals["RandomSearch"][i])
-        print(f"Mann Whitney U test: p = {p} for search space size {search_space_sizes[i]}")
+        print(
+            f"Mann Whitney U test: p = {p} for search space size {search_space_sizes[i]}")
 
-    plt.errorbar(search_space_sizes, avgs[fitness_function], yerr=errs[fitness_function], label=fitness_function, capsize=5)
-    plt.errorbar(search_space_sizes, avgs["RandomSearch"], yerr=errs["RandomSearch"], label="random search", capsize=5)
+    plt.errorbar(search_space_sizes, avgs[fitness_function],
+                 yerr=errs[fitness_function], label=fitness_function, capsize=5)
+    plt.errorbar(search_space_sizes, avgs["RandomSearch"],
+                 yerr=errs["RandomSearch"], label="random search", capsize=5)
     plt.xlabel("Search Space Size")
     plt.ylabel("Best Fitness Found")
-    plt.title(f"Best fitness after {generations} generations (pop size = {pop_size})")
+    plt.title(
+        f"Best fitness after {generations} generations (pop size = {pop_size})")
     plt.legend()
     plt.savefig(argv[1])
 
@@ -427,10 +463,11 @@ def compare_random(argv):
     avgs = {fitness_function: [], "RandomSearch": []}
     errs = {fitness_function: [], "RandomSearch": []}
     vals = {fitness_function: [], "RandomSearch": []}
-    for chromosome_size in (3,4):
+    for chromosome_size in (3, 4):
         for chromosome_range in (3,):
             for random in (False, True):
-                print(f"Running {fitness_function} with chromosome size {chromosome_size} and range {chromosome_range}")
+                print(
+                    f"Running {fitness_function} with chromosome size {chromosome_size} and range {chromosome_range}")
                 if not random:
                     size = (chromosome_range + 1) ** chromosome_size
                     with open(FNAME, 'a+') as f:
@@ -455,10 +492,11 @@ def compare_random(argv):
                     eval_,
                     "--fitness_function",
                     fitness_function
-                    ]
+                ]
                 if random:
                     args.append("-r")
-                proc = subprocess.run(args, capture_output=True, encoding="utf-8")
+                proc = subprocess.run(
+                    args, capture_output=True, encoding="utf-8")
                 summary_idx = proc.stdout.find("SUMMARY")
                 assert(summary_idx >= 0)
                 vals_idx = proc.stdout[:summary_idx].rfind("[")
@@ -496,15 +534,19 @@ def compare_random(argv):
 
     for i in range(len(vals[fitness_function])):
         U, p = mannwhitneyu(vals[fitness_function][i], vals["RandomSearch"][i])
-        print(f"Mann Whitney U test: p = {p} for search space size {search_space_size[i]}")
+        print(
+            f"Mann Whitney U test: p = {p} for search space size {search_space_size[i]}")
 
-    plt.errorbar(search_space_size, avgs[fitness_function], yerr=errs[fitness_function], label=fitness_function, capsize=5)
-    plt.errorbar(search_space_size, avgs["RandomSearch"], yerr=errs["RandomSearch"], label="random search", capsize=5)
+    plt.errorbar(search_space_size, avgs[fitness_function],
+                 yerr=errs[fitness_function], label=fitness_function, capsize=5)
+    plt.errorbar(search_space_size, avgs["RandomSearch"],
+                 yerr=errs["RandomSearch"], label="random search", capsize=5)
     plt.xlabel("Search Space Size")
     plt.ylabel("Best Fitness Found")
     plt.title(f"Best fitness after {generations} generations (pop size = 10)")
     plt.legend()
     plt.show()
+
 
 def fitness_hist(argv):
     fname = argv[1]
@@ -514,27 +556,28 @@ def fitness_hist(argv):
             fitness_idx = line.find(": ") + 2
             fitness = float(line[fitness_idx:])
             fitnesses.append(fitness)
-    
+
     plt.hist(fitnesses, bins=10)
     plt.xlabel("Fitness")
     plt.ylabel("Number of individuals")
     plt.title("Fitness values")
     plt.savefig(argv[2])
 
+
 def fitness_scatter(argv):
-    pop_size = 10
-    generations = 10
-    chromosome_size = 4
+    pop_size = 20
+    generations = 20
+    chromosome_size = 6
     chromosome_range = 7
-    problem = "MultiFilter"
-    fitness_function = argv[1]
+    problem = "QuickSort"
+    eval_ = "GensToOptimal"
     # data to plot
     gens = []
-    fitnesses = []
-    random_fitnesses = []
+    fitnesses = {"RefinementTypesNew": [], "IOExamples": []}
     num_trials = 1
-    for random in (False, True):
-        print(f"Running {fitness_function} for {problem}, with random = {random}")
+    for fitness_function in ("RefinementTypesNew", "IOExamples"):
+        print(
+            f"Running {fitness_function} for {problem}, chromosome size {chromosome_size}, chromosome_range {chromosome_range}")
         args = [
             "./Gable",
             "--pop_size",
@@ -549,13 +592,13 @@ def fitness_scatter(argv):
             problem,
             "--fitness_function",
             fitness_function,
+            "--eval",
+            eval_,
             "--num_trials",
             str(num_trials)
-            ]
-        if random:
-            args.append("-r")
+        ]
         proc = subprocess.run(args, capture_output=True, encoding="utf-8")
-        
+
         trial = 0
         gen = 0
         count = 0
@@ -566,15 +609,12 @@ def fitness_scatter(argv):
                 # empty line
                 continue
 
-            fitness = float(line[fitness_start : fitness_end])
+            fitness = float(line[fitness_start: fitness_end])
             print(f"Gen {gen}, Fitness {fitness}")
-            if random:
+            if fitness_function == "RefinementTypesNew":
                 # only add to gens once
                 gens.append(gen)
-            if random:
-                random_fitnesses.append(fitness)
-            else:
-                fitnesses.append(fitness)
+            fitnesses[fitness_function].append(fitness)
 
             count += 1
             if count == pop_size:
@@ -584,29 +624,32 @@ def fitness_scatter(argv):
             if gen == generations:
                 gen = 0
                 trial += 1
-            
+
             if trial == num_trials:
                 break
 
-    plt.scatter(gens, fitnesses, alpha=0.1, color='b')
-    plt.scatter(gens, random_fitnesses, alpha=0.1, color='r')
-    plt.title(f"{problem}: pop size {pop_size}, {num_trials} trials, size {chromosome_size}, range {chromosome_range}")
+    plt.scatter(gens, fitnesses["RefinementTypesNew"], alpha=0.1, color='b')
+    plt.scatter(gens, fitnesses["IOExamples"], alpha=0.1, color='tab:orange')
+    search_space_size = (chromosome_range + 1) ** chromosome_size
+    plt.title(
+        f"{problem}: pop size {pop_size}, Search Space Size = {search_space_size}")
     plt.xlabel("Generations")
     plt.ylabel("Fitness")
     plt.legend(handles=[
-            mpatches.Patch(color='b', label=fitness_function),
-            mpatches.Patch(color='r', label="random")
-        ])
-    plt.show()
+        mpatches.Patch(color='b', label="RefinementTypesNew"),
+        mpatches.Patch(color='tab:orange', label="IOExamples")
+    ])
+    plt.savefig(argv[1])
+
 
 if __name__ == "__main__":
     args = sys.argv
     # plot_gens()
-    plot_gens_parallel(args)
+    # plot_gens_parallel(args)
     # plot_time()
     # normality_test(args)
     # statistical_significance(args)
     # compare_random(args)
     # compare_random_parallel(args)
     # fitness_hist(args)
-    # fitness_scatter(args)
+    fitness_scatter(args)

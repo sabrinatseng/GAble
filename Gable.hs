@@ -35,8 +35,8 @@ import Text.Printf
 {- Properties defined using command line flags -}
 defineFlag "pop_size" (10 :: Int) "Size of population"
 defineFlag "generations" (10 :: Int) "Number of generations"
-defineFlag "chromosome_size" (5 :: Int) "Number of values in the chromosome"
-defineFlag "chromosome_range" (3 :: Int) "Range of values that the chromosome can have, 0..x"
+defineFlag "chromosome_size" (3 :: Int) "Number of values in the chromosome"
+defineFlag "chromosome_range" (5 :: Int) "Range of values that the chromosome can have, 0..x"
 defineFlag "num_trials" (30 :: Int) "Number of trials of GE to run"
 data FitnessFunction = RefinementTypes | RefinementTypesNew | IOExamples deriving (Show, Read)
 defineEQFlag "fitness_function" [| RefinementTypesNew :: FitnessFunction |] "FITNESS_FUNCTION" "Fitness function for the GE"
@@ -224,7 +224,7 @@ multiFilter3Pieces = cycle [isOddPieceX 1, isEvenPieceX 1, isGTTwoPieceX 1, isOd
 -- pieces for insertion sort
 lteConditionImplX x = unlines
   [
-    "condition" ++ show x ++ ":: Int -> Int -> Bool",
+    "condition" ++ show x ++ ":: (Ord a) => a -> a -> Bool",
     "condition" ++ show x ++ " x y = x <= y"
   ]
 lteConditionRefinementX x = "{-@ condition" ++ show x ++ " :: Ord a => x:a -> y:a -> {v:Bool | (v <=> x <= y)} @-}"
@@ -232,7 +232,7 @@ lteConditionPieceX x = ProgramPiece ("lte" ++ show x) (lteConditionImplX x) (lte
 
 gteConditionImplX x = unlines
   [
-    "condition" ++ show x ++ ":: Int -> Int -> Bool",
+    "condition" ++ show x ++ ":: (Ord a) => a -> a -> Bool",
     "condition" ++ show x ++ " x y = x >= y"
   ]
 gteConditionRefinementX x = "{-@ condition" ++ show x ++ " :: Ord a => x:a -> y:a -> {v:Bool | (v <=> x >= y)} @-}"
@@ -240,14 +240,22 @@ gteConditionPieceX x = ProgramPiece ("gte" ++ show x) (gteConditionImplX x) (gte
 
 eqConditionImplX x = unlines
   [
-    "condition" ++ show x ++ ":: Int -> Int -> Bool",
+    "condition" ++ show x ++ ":: (Ord a) => a -> a -> Bool",
     "condition" ++ show x ++ " x y = x == y"
   ]
 eqConditionRefinementX x = "{-@ condition" ++ show x ++ " :: Ord a => x:a -> y:a -> {v:Bool | (v <=> x == y)} @-}"
 eqConditionPieceX x = ProgramPiece ("eq" ++ show x) (eqConditionImplX x) (eqConditionRefinementX x)
 
+neqConditionImplX x = unlines
+  [
+    "condition" ++ show x ++ ":: (Ord a) => a -> a -> Bool",
+    "condition" ++ show x ++ " x y = x /= y"
+  ]
+neqConditionRefinementX x = "{-@ condition" ++ show x ++ " :: Ord a => x:a -> y:a -> {v:Bool | (v <=> x /= y)} @-}"
+neqConditionPieceX x = ProgramPiece ("neq" ++ show x) (neqConditionImplX x) (neqConditionRefinementX x)
+
 insertSortAscImpl = unlines [
-  "insertSortAsc :: [Int] -> [Int]",
+  "insertSortAsc :: (Ord a) => [a] -> [a]",
   "insertSortAsc [] = []",
   "insertSortAsc (x:xs) = insertAsc x (insertSortAsc xs)"
   ]
@@ -258,7 +266,7 @@ insertSortAscRefinement = unlines [
 insertSortAscPiece = ProgramPiece "insertSortAsc" insertSortAscImpl insertSortAscRefinement
 
 insertAscImpl = unlines [
-  "insertAsc :: Int -> [Int] -> [Int]",
+  "insertAsc :: (Ord a) => a -> [a] -> [a]",
   "insertAsc y []     = [y]",
   "insertAsc y (x:xs)",
   " | (condition1 y x)      = y : x : xs",
@@ -268,7 +276,7 @@ insertAscRefinement = "{-@ insertAsc :: (Ord a) => a -> IncrList a -> IncrList a
 insertAscPiece = ProgramPiece "insertAsc" insertAscImpl insertAscRefinement
 
 insertSortDecImpl = unlines [
-  "insertSortDec :: [Int] -> [Int]",
+  "insertSortDec :: (Ord a) => [a] -> [a]",
   "insertSortDec [] = []",
   "insertSortDec (x:xs) = insertDec x (insertSortDec xs)"
   ]
@@ -279,7 +287,7 @@ insertSortDecRefinement = unlines [
 insertSortDecPiece = ProgramPiece "insertSortDec" insertSortDecImpl insertSortDecRefinement
 
 insertDecImpl = unlines [
-  "insertDec :: Int -> [Int] -> [Int]",
+  "insertDec :: (Ord a) => a -> [a] -> [a]",
   "insertDec y []     = [y]",
   "insertDec y (x:xs)",
   " | (condition2 y x)      = y : x : xs",
@@ -290,13 +298,13 @@ insertDecPiece = ProgramPiece "insertDec" insertDecImpl insertDecRefinement
 
 sortAscDecImpl = unlines
   [
-    "sortAscDec :: [Int] -> ([Int], [Int])",
+    "sortAscDec :: (Ord a) => [a] -> ([a], [a])",
     "sortAscDec xs = (insertSortAsc xs, insertSortDec xs)"
   ]
 sortAscDecRefinement = "{-@ sortAscDec    :: (Ord a) => xs:[a] -> (IncrList a, DecrList a) @-}"
 sortAscDecPiece = ProgramPiece "sortAscDec" sortAscDecImpl sortAscDecRefinement
 
-insertionSortPieces = cycle [lteConditionPieceX 1, gteConditionPieceX 1, eqConditionPieceX 1, lteConditionPieceX 2, gteConditionPieceX 2, eqConditionPieceX 2, insertSortAscPiece, insertAscPiece, insertSortDecPiece, insertDecPiece, sortAscDecPiece, nullPiece]
+insertionSortPieces = cycle [lteConditionPieceX 1, gteConditionPieceX 1, eqConditionPieceX 1, lteConditionPieceX 2, gteConditionPieceX 2, eqConditionPieceX 2, insertSortAscPiece, insertAscPiece, insertSortDecPiece, insertDecPiece, sortAscDecPiece, neqConditionPieceX 1, nullPiece]
 
 andImpl = unlines
   [
@@ -315,7 +323,7 @@ orRefinement = "{-@ boolOp :: x:Bool -> y:Bool -> {v:Bool | (v <=> x || y)} @-}"
 orPiece = ProgramPiece "or" orImpl orRefinement
 
 insert2Impl = unlines [
-  "insertAsc :: Int -> [Int] -> [Int]",
+  "insert :: (Ord a) => a -> [a] -> [a]",
   "insert y []     = [y]",
   "insert y (x:xs)",
   " | (boolOp (condition1 y x) (condition2 y x))      = y : x : xs",
@@ -325,7 +333,7 @@ insert2Refinement = "{-@ insert :: (Ord a) => a -> IncrList a -> IncrList a @-}"
 insert2Piece = ProgramPiece "insert" insert2Impl insert2Refinement
 
 insertSort2Impl = unlines [
-  "insertSortAsc :: [Int] -> [Int]",
+  "insertSort :: (Ord a) => [a] -> [a]",
   "insertSort [] = []",
   "insertSort (x:xs) = insert x (insertSort xs)"
   ]
@@ -340,7 +348,7 @@ insertionSort2Pieces = cycle [lteConditionPieceX 1, gteConditionPieceX 1, eqCond
 -- pieces for quicksort
 ltConditionImplX x = unlines 
   [
-    "condition" ++ show x ++ ":: Int -> Int -> Bool",
+    "condition" ++ show x ++ ":: (Ord a) => a -> a -> Bool",
     "condition" ++ show x ++ " x y = x < y"
   ]
 ltConditionRefinementX x = "{-@ condition" ++ show x ++ " :: Ord a => x:a -> y:a -> {v:Bool | (v <=> x < y)} @-}"
@@ -348,7 +356,7 @@ ltConditionPieceX x = ProgramPiece ("lt" ++ show x) (ltConditionImplX x) (ltCond
 
 filterLtImpl = unlines
   [
-    "filterLt :: Int -> [Int] -> [Int]",
+    "filterLt :: (Ord a) => a -> [a] -> [a]",
     "filterLt x xs = [y | y <- xs, condition1 y x]"
   ]
 filterLtRefinement = "{-@ filterLt :: (Ord a) => x:a -> y:[a] -> {vv: [{v:a | v < x}] | len vv <= len y} @-}"
@@ -356,7 +364,7 @@ filterLtPiece = ProgramPiece "filterLt" filterLtImpl filterLtRefinement
 
 filterGteImpl = unlines
   [
-    "filterGte :: Int -> [Int] -> [Int]",
+    "filterGte :: (Ord a) => a -> [a] -> [a]",
     "filterGte x xs = [y | y <- xs, condition2 y x]"
   ]
 filterGteRefinement = "{-@ filterGte :: (Ord a) => x:a -> y:[a] -> {vv: [{v:a | v >= x}] | len vv <= len y} @-}"
@@ -364,7 +372,7 @@ filterGtePiece = ProgramPiece "filterGte" filterGteImpl filterGteRefinement
 
 pivImpl = unlines
   [
-    "pivApp :: Int -> [Int] -> [Int] -> [Int]",
+    "pivApp :: (Ord a) => a -> [a] -> [a] -> [a]",
     "pivApp piv []     ys  = piv : ys",
     "pivApp piv (x:xs) ys  = x   : pivApp piv xs ys"
   ]
@@ -380,7 +388,7 @@ pivPiece = ProgramPiece "piv" pivImpl pivRefinement
 
 quickSortImpl = unlines
   [
-    "quickSort :: [Int] -> [Int]",
+    "quickSort :: (Ord a) => [a] -> [a]",
     "quickSort []     = []",
     "quickSort (x:xs) = pivApp x lts gts",
     "   where",
@@ -394,7 +402,7 @@ quickSortRefinement = unlines
   ]
 quickSortPiece = ProgramPiece "quickSort" quickSortImpl quickSortRefinement
 
-quickSortPieces = cycle [ltConditionPieceX 1, gteConditionPieceX 1, ltConditionPieceX 2, gteConditionPieceX 2, filterLtPiece, filterGtePiece, pivPiece, quickSortPiece, nullPiece]
+quickSortPieces = cycle [ltConditionPieceX 1, gteConditionPieceX 1, ltConditionPieceX 2, gteConditionPieceX 2, filterLtPiece, filterGtePiece, pivPiece, quickSortPiece, eqConditionPieceX 1, eqConditionPieceX 2, nullPiece]
 
 {- input/output examples for calculating fitness -}
 type Input = [Int]
@@ -446,6 +454,7 @@ quickSortTests =
   [
     ([], []),
     ([1], [1]),
+    ([2, 2], [2, 2]),
     ([0, 2, 1], [0, 1, 2]),
     ([3, 2, 1], [1, 2, 3]),
     ([4, 1, 9, -1], [-1, 1, 4, 9])
@@ -499,7 +508,7 @@ fitnessMemo = Data.Map.empty
  change should occur. TODO (Could be smarter an verify if a reset is needed)-}
 mutateOp :: Population -> [Float] -> [Int] -> Population
 mutateOp [] _ _ = []
-mutateOp (ind : pop) rndDs rndIs = (createIndiv (mutate'' (genotype ind) (take flags_chromosome_size rndDs) (take flags_chromosome_size rndIs))) : mutateOp pop (drop flags_chromosome_size rndDs) (drop flags_chromosome_size rndIs)
+mutateOp (ind : pop) rndDs rndIs = repair (createIndiv (mutate'' (genotype ind) (take flags_chromosome_size rndDs) (take flags_chromosome_size rndIs))) (drop flags_chromosome_size rndIs) : mutateOp pop (drop flags_chromosome_size rndDs) (drop 100 rndIs)
 
 {- Mutate a genotype by uniformly changing the integer. -}
 mutate'' :: Genotype -> [Float] -> [Int] -> [Int]
@@ -510,12 +519,12 @@ mutate'' (c : cs) (rndD : rndDs) (rndI : rndIs) = (if rndD > mutationRate then c
 
 {- Calls crossover on the population TODO How does it handle oddnumber
  sized populations? Fold? Smarter resetting values in individual TODO hardcoding rnd drop-}
-xoverOp :: Population -> [Float] -> Population
-xoverOp [] _ = []
-xoverOp (ind1 : ind2 : pop) rndDs =
+xoverOp :: Population -> [Float] -> [Int] -> Population
+xoverOp [] _ _ = []
+xoverOp (ind1 : ind2 : pop) rndDs rndIs =
   let (child1, child2) = xover (genotype ind1, genotype ind2) (take 2 rndDs)
-   in (createIndiv child1) : (createIndiv child2) : xoverOp pop (drop 2 rndDs)
-xoverOp (ind1 : []) rndDs = [ind1]
+   in repair (createIndiv child1) rndIs : repair (createIndiv child2) (drop 10 rndIs) : xoverOp pop (drop 2 rndDs) (drop 100 rndIs)
+xoverOp (ind1 : []) rndDs rndIs = [ind1]
 
 {- Singlepoint crossover, crossover probability is hardcoded-}
 xover :: (Genotype, Genotype) -> [Float] -> (Genotype, Genotype)
@@ -771,11 +780,17 @@ createIndiv xs = GAIndividual xs defaultFitness
 {-creates an array of individuals with random genotypes-}
 createPop :: Int -> [Int] -> Population
 createPop 0 _ = []
-createPop popCnt rndInts = createIndiv (take flags_chromosome_size rnds) : createPop (popCnt -1) (drop flags_chromosome_size rnds)
-  where
-    rnds = case flags_disallow_dups of
-          True -> nub rndInts
-          False -> rndInts
+createPop popCnt rndInts = repair (createIndiv (take flags_chromosome_size rndInts)) (drop flags_chromosome_size rndInts) : createPop (popCnt -1) (drop 100 rndInts)
+
+{- "Repair" a chromosome - use rndInts to remove duplicates if flags_disallow_dups is set -}
+repair :: GAIndividual -> [Int] -> GAIndividual
+repair ind rndInts = if not flags_disallow_dups || (length uniqs == length (genotype ind)) then ind
+                      else repair (GAIndividual newGeno fit) (drop n rndInts)
+                        where
+                          uniqs = nub (genotype ind)
+                          n = flags_chromosome_size - length uniqs
+                          newGeno = uniqs ++ take n rndInts
+                          fit = evalState (calculateFitness newGeno) fitnessMemo
 
 {- Evolve the population recursively counting with genotype and
 returning a population of the best individuals of each
@@ -785,7 +800,7 @@ evolve pop _ _ 0 _ = return []
 evolve [] _ _ _ _ = return (error "Empty population")
 evolve pop rndVs rndIs gen rndDs = do
   memo <- Control.Monad.State.get
-  let (newPop, memo2) = runState (calculateFitnessOp (mutateOp (xoverOp (tournamentSelectionOp (length pop) pop rndIs tournamentSize) rndDs) rndDs rndVs)) memo
+  let (newPop, memo2) = runState (calculateFitnessOp (mutateOp (xoverOp (tournamentSelectionOp (length pop) pop rndIs tournamentSize) rndDs rndVs) rndDs rndVs)) memo
   let (rest, memo3) = runState (evolve (generationalReplacementOp pop newPop eliteSize) (drop (flags_pop_size * 10) rndVs) (drop (flags_pop_size * 10) rndIs) (gen - 1) (drop (flags_pop_size * 10) rndDs)) memo2
   put memo3
   return (bestInd pop maxInd : rest)
@@ -886,7 +901,7 @@ fitnessAll (x : xs) = do
 main = do
   _ <- $initHFlags ""
   gen <- getStdGen
-  print $ evalState (calculateFitness [0, 3, 4, 5, 6, 7]) fitnessMemo
+  print $ evalState (calculateFitness [0, 4, 6, 7, 8, 9, 10]) fitnessMemo
   if flags_fitness_all
     then fitnessAll $ replicateM flags_chromosome_size [0..flags_chromosome_range]
     else do
