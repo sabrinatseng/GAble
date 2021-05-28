@@ -210,8 +210,8 @@ def plot_gens_parallel(argv):
 
     pop_size = 20
     generations = 20
-    # problem = "MultiFilter2"
-    problem = "QuickSort"
+    # problem = "QuickSort"
+    problem = "AbsSum"
     eval_ = "GensToOptimal"
     num_trials = 60
     processes = 5   # processes per run
@@ -222,7 +222,7 @@ def plot_gens_parallel(argv):
     vals = {"RefinementTypesNew": [], "IOExamples": [], "RandomSearch": []}
     # for (chromosome_size, chromosome_range) in ((5,8), (5,9), (6,9), (7,9)):
     # for (chromosome_size, chromosome_range) in ((3,4), (3,5), (4,5)):
-    for (chromosome_size, chromosome_range) in ((6, 7), (6, 8), (6, 9)):
+    for (chromosome_size, chromosome_range) in ((4, 8), (4, 9), (4, 10)):
         for fitness_function in ("RefinementTypesNew", "IOExamples", "RandomSearch"):
             print(
                 f"Starting {fitness_function} with chromosome size {chromosome_size}, range {chromosome_range}")
@@ -571,72 +571,71 @@ def fitness_scatter(argv):
     chromosome_range = 7
     problem = "QuickSort"
     eval_ = "GensToOptimal"
+    # fitness_function = "RefinementTypesNew"
+    fitness_function = "IOExamples"
     # data to plot
     gens = []
-    fitnesses = {"RefinementTypesNew": [], "IOExamples": []}
+    fitnesses = []
     num_trials = 1
-    for fitness_function in ("RefinementTypesNew", "IOExamples"):
-        print(
-            f"Running {fitness_function} for {problem}, chromosome size {chromosome_size}, chromosome_range {chromosome_range}")
-        args = [
-            "./Gable",
-            "--pop_size",
-            str(pop_size),
-            "--generations",
-            str(generations),
-            "--chromosome_size",
-            str(chromosome_size),
-            "--chromosome_range",
-            str(chromosome_range),
-            "--problem",
-            problem,
-            "--fitness_function",
-            fitness_function,
-            "--eval",
-            eval_,
-            "--num_trials",
-            str(num_trials)
-        ]
-        proc = subprocess.run(args, capture_output=True, encoding="utf-8")
 
-        trial = 0
-        gen = 0
-        count = 0
-        for line in proc.stderr.split('\n'):
-            fitness_start = line.find(":") + 1
-            fitness_end = line.find(",")
-            if fitness_start == -1 or fitness_end == -1:
-                # empty line
-                continue
+    print(
+        f"Running {fitness_function} for {problem}, chromosome size {chromosome_size}, chromosome_range {chromosome_range}")
+    args = [
+        "./Gable",
+        "--pop_size",
+        str(pop_size),
+        "--generations",
+        str(generations),
+        "--chromosome_size",
+        str(chromosome_size),
+        "--chromosome_range",
+        str(chromosome_range),
+        "--problem",
+        problem,
+        "--fitness_function",
+        fitness_function,
+        "--eval",
+        eval_,
+        "--num_trials",
+        str(num_trials)
+    ]
+    proc = subprocess.run(args, capture_output=True, encoding="utf-8")
 
-            fitness = float(line[fitness_start: fitness_end])
-            print(f"Gen {gen}, Fitness {fitness}")
-            if fitness_function == "RefinementTypesNew":
-                # only add to gens once
-                gens.append(gen)
-            fitnesses[fitness_function].append(fitness)
+    trial = 0
+    gen = 0
+    count = 0
+    for line in proc.stderr.split('\n'):
+        fitness_start = line.find(":") + 1
+        fitness_end = line.find(",")
+        if fitness_start == -1 or fitness_end == -1:
+            # empty line
+            continue
 
-            count += 1
-            if count == pop_size:
-                count = 0
-                gen += 1
+        fitness = float(line[fitness_start: fitness_end])
+        print(f"Gen {gen}, Fitness {fitness}")
+        gens.append(gen)
+        fitnesses.append(fitness)
 
-            if gen == generations:
-                gen = 0
-                trial += 1
+        count += 1
+        if count == pop_size:
+            count = 0
+            gen += 1
 
-            if trial == num_trials:
-                break
+        if gen == generations:
+            gen = 0
+            trial += 1
 
-    plt.scatter(gens, fitnesses["RefinementTypesNew"], alpha=0.1, color='b')
-    plt.scatter(gens, fitnesses["IOExamples"], alpha=0.1, color='tab:orange')
+        if trial == num_trials:
+            break
+
+    plt.scatter(gens, fitnesses, alpha=0.1, color='tab:orange')
     search_space_size = (chromosome_range + 1) ** chromosome_size
     plt.title(
         f"{problem}: pop size {pop_size}, Search Space Size = {search_space_size}")
     plt.xlabel("Generations")
     plt.ylabel("Fitness")
     plt.legend(handles=[
-        mpatches.Patch(color='b', label="RefinementTypesNew"),
+        # mpatches.Patch(color='b', label="RefinementTypesNew"),
         mpatches.Patch(color='tab:orange', label="IOExamples")
     ])
     plt.savefig(argv[1])
@@ -645,11 +644,11 @@ def fitness_scatter(argv):
 if __name__ == "__main__":
     args = sys.argv
     # plot_gens()
-    # plot_gens_parallel(args)
+    plot_gens_parallel(args)
     # plot_time()
     # normality_test(args)
     # statistical_significance(args)
     # compare_random(args)
     # compare_random_parallel(args)
     # fitness_hist(args)
-    fitness_scatter(args)
+    # fitness_scatter(args)

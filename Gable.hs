@@ -40,7 +40,7 @@ defineFlag "chromosome_range" (5 :: Int) "Range of values that the chromosome ca
 defineFlag "num_trials" (30 :: Int) "Number of trials of GE to run"
 data FitnessFunction = RefinementTypes | RefinementTypesNew | IOExamples deriving (Show, Read)
 defineEQFlag "fitness_function" [| RefinementTypesNew :: FitnessFunction |] "FITNESS_FUNCTION" "Fitness function for the GE"
-data Problem = FilterEvens | Bound | MultiFilter2 | MultiFilter3 | InsertionSort | InsertionSort2 | QuickSort deriving (Show, Read)
+data Problem = FilterEvens | Bound | MultiFilter2 | MultiFilter3 | InsertionSort | InsertionSort2 | QuickSort | AbsSum deriving (Show, Read)
 defineEQFlag "problem" [| FilterEvens :: Problem |] "PROBLEM" "Synthesis problem"
 data Eval = GensToOptimal | BestFitness deriving (Show, Read)
 defineEQFlag "eval" [| BestFitness :: Eval |] "EVAL" "Method for eval"
@@ -404,11 +404,64 @@ quickSortPiece = ProgramPiece "quickSort" quickSortImpl quickSortRefinement
 
 quickSortPieces = cycle [ltConditionPieceX 1, gteConditionPieceX 1, ltConditionPieceX 2, gteConditionPieceX 2, filterLtPiece, filterGtePiece, pivPiece, quickSortPiece, eqConditionPieceX 1, eqConditionPieceX 2, nullPiece]
 
+-- absolute sum
+positiveConditionImpl = unlines
+  [
+    "condition :: Int -> Bool",
+    "condition x = x >= 0"
+  ]
+positiveConditionRefinement = "{-@ condition :: x:Int -> {v:Bool | (v <=> x >= 0)} @-}"
+positiveConditionPiece = ProgramPiece "positive" positiveConditionImpl positiveConditionRefinement
+
+identImpl = unlines
+  [
+    "f :: Int -> Int",
+    "f x = x"
+  ]
+identRefinement = "{-@ f :: x:Int -> {v:Int | v == x} @-}"
+identPiece = ProgramPiece "ident" identImpl identRefinement
+
+absImpl = unlines
+  [
+    "f :: Int -> Int",
+    "f x = if condition x then x else (-x)"
+  ]
+absRefinement = "{-@ f :: x:Int -> {v:Int | v >= 0} @-}"
+absPiece = ProgramPiece "abs" absImpl absRefinement
+
+doubleImpl = unlines
+  [
+    "f :: Int -> Int",
+    "f x = x*2"
+  ]
+doubleRefinement = "{-@ f :: x:Int -> {v:Int | v == x*2} @-}"
+doublePiece = ProgramPiece "double" doubleImpl doubleRefinement
+
+negateImpl = unlines
+  [
+    "f :: Int -> Int",
+    "f x = -1 * x"
+  ]
+negateRefinement = "{-@ f :: x:Int -> {v:Int | v == x*2} @-}"
+negatePiece = ProgramPiece "negate" negateImpl negateRefinement
+
+fSumImpl = unlines
+  [
+    "fSum :: [Int] -> Int",
+    "fSum [] = 0",
+    "fSum (x:xs) = f x + fSum xs"
+  ]
+fSumRefinement = "{-@ fSum :: x:[Int] -> {v:Int | v >= 0} @-}"
+fSumPiece = ProgramPiece "fSum" fSumImpl fSumRefinement
+
+absSumPieces = cycle [positiveConditionPiece, isOddPiece, isEvenPiece, absPiece, identPiece, doublePiece, negatePiece, fSumPiece, isOddPieceX 1, isEvenPieceX 1, isOddPieceX 2, isEvenPieceX 2]
+
 {- input/output examples for calculating fitness -}
 type Input = [Int]
 
-type Output = [Int]
+-- type Output = [Int]
 -- type Output = ([Int], [Int])
+type Output = Int
 
 filterEvensTests =
   [ ([0, 1, 2, 3, 4], [0, 2, 4]),
@@ -460,6 +513,16 @@ quickSortTests =
     ([4, 1, 9, -1], [-1, 1, 4, 9])
   ]
 
+absSumTests = 
+  [
+    ([], 0),
+    ([1], 1),
+    ([3, 5], 8),
+    ([-3, -5], 8),
+    ([-1, 1], 2),
+    ([-3, 2, 4, -1, 0], 10)
+  ]
+
 
 {- Program pieces and io examples, based on value of the "problem" flag -}
 pieces = case flags_problem of
@@ -470,6 +533,7 @@ pieces = case flags_problem of
   InsertionSort -> insertionSortPieces
   InsertionSort2 -> insertionSort2Pieces
   QuickSort -> quickSortPieces
+  AbsSum -> absSumPieces
 
 (test_inputs, expected_outputs) = case flags_problem of
   -- FilterEvens -> unzip filterEvensTests
@@ -478,8 +542,9 @@ pieces = case flags_problem of
   -- MultiFilter2 -> unzip multiFilter2Tests
   -- MultiFilter3 -> ([], [])
   -- InsertionSort -> unzip insertionSortTests
-  InsertionSort2 -> unzip insertionSort2Tests
-  QuickSort -> unzip quickSortTests
+  -- InsertionSort2 -> unzip insertionSort2Tests
+  -- QuickSort -> unzip quickSortTests
+  AbsSum -> unzip absSumTests
 
 fnName = case flags_problem of
   FilterEvens -> "filterEvens"
@@ -489,6 +554,7 @@ fnName = case flags_problem of
   InsertionSort -> "sortAscDec"
   InsertionSort2 -> "insertSort"
   QuickSort -> "quickSort"
+  AbsSum -> "fSum"
 
 {- options for writing to file -}
 openFileFlags = OpenFileFlags {append = False, exclusive = False, noctty = False, nonBlock = False, trunc = True}
@@ -672,6 +738,15 @@ quickSortMain =
       "         putStrLn $ \"sorted: \" ++ show (quickSort test)"
     ]
 
+fSumMain = 
+  unlines
+    [
+      "test = [-1, 1, 2, 0, -4]",
+      "main = do",
+      "         putStrLn $ \"list: \" ++ show test",
+      "         putStrLn $ \"abs sum: \" ++ show (fSum test)"
+    ]
+
 mainPiece = case flags_problem of
   FilterEvens -> filterEvensMain
   Bound -> boundMain
@@ -680,6 +755,7 @@ mainPiece = case flags_problem of
   InsertionSort -> insertionSortMain
   InsertionSort2 -> insertionSort2Main
   QuickSort -> quickSortMain
+  AbsSum -> fSumMain
 
 {- Use refinement type checking to calculate fitness. -}
 {-# NOINLINE refinementTypeCheck #-}
@@ -901,7 +977,7 @@ fitnessAll (x : xs) = do
 main = do
   _ <- $initHFlags ""
   gen <- getStdGen
-  print $ evalState (calculateFitness [0, 4, 6, 7, 8, 9, 10]) fitnessMemo
+  print $ evalState (calculateFitness [0, 3, 4, 5, 6, 7, 10]) fitnessMemo
   if flags_fitness_all
     then fitnessAll $ replicateM flags_chromosome_size [0..flags_chromosome_range]
     else do
