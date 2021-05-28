@@ -1,0 +1,23 @@
+QuickSort pop_size=20 generations=20 num_trials=60 chromosome_size=6 chromosome_range=7 eval=GensToOptimal fitness_function=RefinementTypesNew
+
+real    201m5.308s
+user    686m36.732s
+sys     307m12.176s
+
+QuickSort pop_size=20 generations=20 num_trials=60 chromosome_size=6 chromosome_range=7 eval=GensToOptimal fitness_function=IOExamples
+
+real    25m1.208s
+user    107m2.356s
+sys     5m52.508s
+
+QuickSort pop_size=20 generations=20 num_trials=60 chromosome_size=6 chromosome_range=7 eval=GensToOptimal fitness_function=RefinementTypesNew -r
+
+real    237m0.599s
+user    807m49.688s
+sys     365m44.776s
+
+QuickSort pop_size=200 generations=20 num_trials=60 chromosome_size=6 chromosome_range=7 eval=GensToOptimal fitness_function=IOExamples
+
+real    470m2.103s
+user    2173m36.436s
+sys     125m42.292s
