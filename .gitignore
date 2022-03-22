@@ -4,4 +4,4 @@
 *.dyn_hi
 *.dyn_o
 
-synth*
+synth*.hs
